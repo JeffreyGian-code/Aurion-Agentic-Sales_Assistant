@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Activity, Sparkles, CheckCircle2, ChevronRight, CircleDashed, X } from 'lucide-react'
+import { Activity, CheckCircle2, ChevronRight, CircleDashed, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { PendingRequest } from '../hooks/useChat'
 import type { Conversation, TraceRun } from '../lib/types'
 import { cn, formatTime } from '../lib/utils'
 import { Markdown } from './MessageBubble'
 import { formatDuration, stepTiming } from '../lib/traceTiming'
+import { AurionLogo } from './AurionLogo'
 
 interface Props {
   conversation: Conversation | null
@@ -40,16 +41,16 @@ function Dashboard({ conversation, pending }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 px-5 py-6">
-        <div className="aurion-mark grid size-10 place-items-center rounded-2xl text-white"><Sparkles className="size-5" /></div>
+        <AurionLogo className="size-10" />
         <div><p className="text-base font-medium tracking-tight">Aurion</p><p className="text-xs text-slate-500 dark:text-slate-400">Your vehicle assistant</p></div>
       </div>
       <div className="px-4 pt-5 pb-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold"><Activity className="size-4 text-brand-500" /> Execution dashboard</h2>
+        <h2 className="flex items-center gap-2 text-sm font-semibold"><Activity className="size-4 text-white" /> Execution dashboard</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">Follow each query from input to final response.</p>
         <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500"><span>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</span><span role="status" className={pending ? 'text-brand-600 dark:text-brand-300' : ''}>{pending ? 'Running' : 'Ready'}</span></div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-4" aria-label="Execution runs">
-        {runs.length === 0 && <div className="activity-card rounded-3xl px-5 py-8 text-center"><Activity className="mx-auto mb-3 size-6 text-brand-500" /><p className="text-sm font-medium">Your activity, at a glance</p><p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">Query details and results will appear here.</p>{!!conversation?.messages.length && <p className="mt-2 text-xs text-slate-500">Execution details are available for new messages.</p>}</div>}
+        {runs.length === 0 && <div className="activity-card rounded-3xl px-5 py-8 text-center"><Activity className="mx-auto mb-3 size-6 text-white" /><p className="text-sm font-medium">Your activity, at a glance</p><p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">Query details and results will appear here.</p>{!!conversation?.messages.length && <p className="mt-2 text-xs text-slate-500">Execution details are available for new messages.</p>}</div>}
         {[...runs].reverse().map((run, index) => <Run key={run.id} run={run} number={runs.length - index} reply={run.status === 'running' ? pending?.reply : undefined} />)}
       </div>
     </div>

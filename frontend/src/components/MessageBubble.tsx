@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import type { ChatErrorKind } from '../api/types'
 import type { Message } from '../lib/types'
 import { cn, formatTime } from '../lib/utils'
+import { AurionLogo } from './AurionLogo'
 
 const mdComponents: Components = {
   table: ({ children }) => (
@@ -111,14 +112,12 @@ function AssistantBubble({ message }: { message: Message }) {
 
 export function Avatar({ pulse = false }: { pulse?: boolean }) {
   return (
-    <div
+    <AurionLogo
       className={cn(
-        'aurion-mark relative mt-0.5 grid size-8 shrink-0 place-items-center rounded-full text-white',
+        'relative mt-0.5 size-8',
         pulse && 'animate-pulse',
       )}
-    >
-      <Sparkles className="size-4" />
-    </div>
+    />
   )
 }
 

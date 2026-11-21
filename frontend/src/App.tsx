@@ -129,7 +129,13 @@ export default function App() {
                 onRetry={chat.retry}
               />
             ) : (
-              <div className="min-h-0 flex-1" />
+              <section aria-labelledby="welcome-title" className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10 text-center">
+                <h2 id="welcome-title" className="text-3xl font-medium leading-snug tracking-tight text-slate-800 sm:text-4xl dark:text-slate-100">
+                  Hello there.
+                  <span className="mt-2 block text-2xl font-normal sm:text-3xl">Aurion, at your service.</span>
+                </h2>
+                <p className="mt-5 text-sm leading-relaxed text-slate-500 sm:text-base dark:text-slate-400">What would you like to drive today?</p>
+              </section>
             )}
           </div>
 
