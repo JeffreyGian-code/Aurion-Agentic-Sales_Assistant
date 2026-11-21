@@ -19,7 +19,7 @@ export function TypingIndicator({ startedAt, status }: { startedAt: number; stat
       aria-label="Assistant activity"
     >
       <Avatar pulse />
-      <div className="min-w-0 rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="activity-card min-w-0 rounded-3xl px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex gap-1">
             {[0, 1, 2].map((i) => (

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { Activity, Car, CheckCircle2, ChevronRight, CircleDashed, X } from 'lucide-react'
+import { Activity, Sparkles, CheckCircle2, ChevronRight, CircleDashed, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { PendingRequest } from '../hooks/useChat'
 import type { Conversation, TraceRun } from '../lib/types'
@@ -17,14 +17,14 @@ interface Props {
 export function Sidebar(props: Props) {
   return (
     <>
-      <aside className="hidden w-96 shrink-0 border-r border-slate-200 bg-white/70 backdrop-blur md:flex md:flex-col dark:border-slate-800 dark:bg-slate-900/60">
+      <aside className="sidebar-surface hidden w-72 shrink-0 overflow-hidden rounded-[28px] border md:flex md:flex-col xl:w-80">
         <Dashboard {...props} />
       </aside>
       <AnimatePresence>
         {props.open && (
           <motion.div className="fixed inset-0 z-40 md:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={props.onClose} />
-            <motion.aside className="absolute inset-y-0 left-0 flex w-[92%] max-w-sm flex-col bg-white shadow-2xl dark:bg-slate-900" initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}>
+            <motion.aside className="sidebar-surface absolute inset-y-2 left-2 flex w-[90%] max-w-sm flex-col overflow-hidden rounded-[28px] border shadow-2xl" initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}>
               <button onClick={props.onClose} className="absolute top-4 right-3 z-10 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Close execution dashboard"><X className="size-5" /></button>
               <Dashboard {...props} />
             </motion.aside>
@@ -39,9 +39,9 @@ function Dashboard({ conversation, pending }: Props) {
   const runs = conversation?.traces ?? []
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2.5 border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-        <div className="grid size-9 place-items-center rounded-xl bg-brand-600 text-white"><Car className="size-5" /></div>
-        <div><p className="text-sm font-semibold">AutoAssist</p><p className="text-xs text-slate-500">Vehicle Sales Assistant</p></div>
+      <div className="flex items-center gap-3 px-5 py-6">
+        <div className="aurion-mark grid size-10 place-items-center rounded-2xl text-white"><Sparkles className="size-5" /></div>
+        <div><p className="text-base font-medium tracking-tight">Aurion</p><p className="text-xs text-slate-500 dark:text-slate-400">Your vehicle assistant</p></div>
       </div>
       <div className="px-4 pt-5 pb-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold"><Activity className="size-4 text-brand-500" /> Execution dashboard</h2>
@@ -49,7 +49,7 @@ function Dashboard({ conversation, pending }: Props) {
         <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500"><span>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</span><span role="status" className={pending ? 'text-brand-600 dark:text-brand-300' : ''}>{pending ? 'Running' : 'Ready'}</span></div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-4" aria-label="Execution runs">
-        {runs.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 px-5 py-8 text-center dark:border-slate-700"><Activity className="mx-auto mb-3 size-6 text-slate-400" /><p className="text-sm font-medium">Your system activity appears here</p><p className="mt-2 text-xs leading-relaxed text-slate-500">Send a message to see extracted data, tool calls, results, and the assistant&apos;s response.</p>{!!conversation?.messages.length && <p className="mt-2 text-xs text-slate-500">Execution details are available for new messages.</p>}</div>}
+        {runs.length === 0 && <div className="activity-card rounded-3xl px-5 py-8 text-center"><Activity className="mx-auto mb-3 size-6 text-brand-500" /><p className="text-sm font-medium">Your activity, at a glance</p><p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">Query details and results will appear here.</p>{!!conversation?.messages.length && <p className="mt-2 text-xs text-slate-500">Execution details are available for new messages.</p>}</div>}
         {[...runs].reverse().map((run, index) => <Run key={run.id} run={run} number={runs.length - index} reply={run.status === 'running' ? pending?.reply : undefined} />)}
       </div>
     </div>
@@ -69,7 +69,7 @@ function Run({ run, number, reply }: { run: TraceRun; number: number; reply?: st
     return () => window.clearInterval(timer)
   }, [running])
   return (
-    <details open className="group/run rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <details open className="activity-card group/run overflow-hidden rounded-3xl border border-white/50 dark:border-white/5">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-3 text-xs">
         <ChevronRight className="size-3.5 shrink-0 transition group-open/run:rotate-90" />
         {running ? <CircleDashed className="size-4 shrink-0 animate-spin text-brand-500" /> : <CheckCircle2 className={cn('size-4 shrink-0', run.status === 'completed' ? 'text-emerald-500' : 'text-amber-500')} />}

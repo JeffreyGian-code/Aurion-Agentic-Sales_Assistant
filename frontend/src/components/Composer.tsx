@@ -1,12 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowUp, Calculator, Clock, Square } from 'lucide-react'
-import { useEffect, useState, type RefObject } from 'react'
+import { ArrowUp, Clock, Square } from 'lucide-react'
+import { useLayoutEffect, type RefObject } from 'react'
 import { MAX_MESSAGE_LENGTH } from '../api/types'
 import { IP_COOLDOWN_SECONDS } from '../hooks/useChat'
 import { cn } from '../lib/utils'
-import { EmiQuickCalc } from './EmiQuickCalc'
-
-const QUICK_CHIPS = ['Under 10 lakh', 'Automatic', 'Diesel', 'SUV', 'Sedan', 'Electric']
 
 interface Props {
   value: string
@@ -21,19 +18,35 @@ interface Props {
 }
 
 export function Composer({ value, onChange, onSend, onStop, pending, cooldown, budgetExhausted, budgetResetsAt, inputRef }: Props) {
-  const [calcOpen, setCalcOpen] = useState(false)
   const trimmed = value.trim()
   const length = value.length
   const tooLong = length > MAX_MESSAGE_LENGTH
   const blocked = pending || cooldown > 0 || budgetExhausted
   const canSend = !!trimmed && !tooLong && !blocked
 
-  // Auto-grow the textarea.
-  useEffect(() => {
+  // Grow in whole lines, including when the available width changes.
+  useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    const resize = () => {
+      const style = getComputedStyle(el)
+      const lineHeight = parseFloat(style.lineHeight)
+      const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+      el.style.height = 'auto'
+      const lines = Math.max(1, Math.ceil((el.scrollHeight - padding) / lineHeight))
+      el.style.height = `${Math.min(lines, 8) * lineHeight + padding}px`
+      el.style.overflowY = lines > 8 ? 'auto' : 'hidden'
+    }
+    resize()
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth
+        resize()
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [value, inputRef])
 
   const submit = () => {
@@ -41,34 +54,15 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
     onSend(trimmed)
   }
 
-  const addChip = (chip: string) => {
-    const base = value.trimEnd()
-    onChange(base ? `${base}, ${chip.toLowerCase()}` : `Find ${chip.toLowerCase()} cars`)
-    inputRef.current?.focus()
-  }
-
 
   return (
-    <div className="px-3 pb-4 sm:px-6">
-      <div className="relative mx-auto max-w-3xl">
+    <div className="relative shrink-0 px-3 pb-4 pt-3 sm:px-6 sm:pb-6">
+      <div className="relative w-full">
         {budgetExhausted && (
           <p role="status" className="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-100">
             You’ve used all 7 calls.{budgetResetsAt ? ` Your budget renews ${new Date(budgetResetsAt * 1000).toLocaleString()}.` : ''} Resetting the conversation keeps this limit.
           </p>
         )}
-        <AnimatePresence>
-          {calcOpen && (
-            <EmiQuickCalc
-              disabled={blocked}
-              onClose={() => setCalcOpen(false)}
-              onAsk={(p) => {
-                setCalcOpen(false)
-                onSend(p)
-              }}
-            />
-          )}
-        </AnimatePresence>
-
         <AnimatePresence>
           {cooldown > 0 && (
             <motion.div
@@ -97,10 +91,10 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
 
         <div
           className={cn(
-            'rounded-2xl border bg-white shadow-lg shadow-slate-900/5 transition focus-within:shadow-xl dark:bg-slate-900 dark:shadow-black/20',
+            'composer-glass flex items-end gap-2 rounded-[28px] border p-2 transition duration-200',
             tooLong
               ? 'border-red-400 ring-2 ring-red-400/20'
-              : 'border-slate-200 focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10 dark:border-slate-700',
+              : 'border-white/80 focus-within:border-brand-300 focus-within:ring-4 focus-within:ring-brand-500/10 dark:border-white/15 dark:focus-within:border-brand-400/60',
           )}
         >
           <textarea
@@ -114,54 +108,17 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
               }
             }}
             rows={1}
-            placeholder={cooldown > 0 ? 'Please wait a moment…' : 'Ask about cars, budgets or EMI…'}
+            placeholder="Ask Aurion anything"
             aria-label="Message"
-            className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] outline-none placeholder:text-slate-400"
+            className="block min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-base leading-6 text-slate-800 outline-none placeholder:text-slate-500 dark:text-slate-100 dark:placeholder:text-slate-400"
           />
 
-          <div className="flex items-center gap-2 px-2.5 pb-2.5">
-            <button
-              onClick={() => setCalcOpen((o) => !o)}
-              className={cn(
-                'flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition',
-                calcOpen
-                  ? 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200',
-              )}
-              aria-expanded={calcOpen}
-              aria-label="Open EMI calculator"
-            >
-              <Calculator className="size-4" />
-              <span className="hidden sm:inline">EMI</span>
-            </button>
-
-            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none]">
-              {QUICK_CHIPS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => addChip(c)}
-                  className="shrink-0 rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-600 transition hover:border-brand-400 hover:text-brand-600 active:scale-95 dark:border-slate-700 dark:text-slate-300 dark:hover:text-brand-300"
-                >
-                  + {c}
-                </button>
-              ))}
-            </div>
-
-            <span
-              className={cn(
-                'hidden shrink-0 text-[11px] tabular-nums transition sm:inline',
-                length === 0 && 'opacity-0',
-                tooLong ? 'font-semibold text-red-500' : length > MAX_MESSAGE_LENGTH * 0.9 ? 'text-amber-500' : 'text-slate-400',
-              )}
-            >
-              {length}/{MAX_MESSAGE_LENGTH}
-            </span>
-
+          <div className="flex shrink-0 items-center justify-end">
             {pending ? (
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={onStop}
-                className="grid size-9 shrink-0 place-items-center rounded-xl bg-slate-900 text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-slate-900 text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
                 aria-label="Stop waiting for reply"
                 title="Stop"
               >
@@ -173,10 +130,10 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
                 onClick={submit}
                 disabled={!canSend}
                 className={cn(
-                  'grid size-9 shrink-0 place-items-center rounded-xl transition',
+                  'grid size-10 shrink-0 place-items-center rounded-full transition',
                   canSend
-                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30 hover:bg-brand-500'
-                    : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
+                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20 hover:bg-brand-500'
+                    : 'bg-white/50 text-slate-400 dark:bg-white/10 dark:text-slate-500',
                 )}
                 aria-label="Send message"
               >
@@ -186,16 +143,11 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
           </div>
         </div>
 
-        <p className="mt-2 text-center text-[11px] text-slate-400">
-          {tooLong ? (
-            <span className="text-red-500">Message is too long. Keep it under {MAX_MESSAGE_LENGTH} characters.</span>
-          ) : (
-            <>
-              <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line · AI
-              replies can be inaccurate, so verify prices with the dealer.
-            </>
-          )}
-        </p>
+        {tooLong && (
+          <p role="alert" className="mt-2 text-center text-[11px] text-red-500">
+            Message is too long. Keep it under {MAX_MESSAGE_LENGTH} characters.
+          </p>
+        )}
       </div>
     </div>
   )
