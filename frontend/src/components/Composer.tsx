@@ -132,7 +132,7 @@ export function Composer({ value, onChange, onSend, onStop, pending, cooldown, b
                 className={cn(
                   'grid size-10 shrink-0 place-items-center rounded-full transition',
                   canSend
-                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20 hover:bg-brand-500'
+                    ? 'bg-white text-slate-500 shadow-md shadow-black/10 hover:bg-slate-100'
                     : 'bg-white/50 text-slate-400 dark:bg-white/10 dark:text-slate-500',
                 )}
                 aria-label="Send message"

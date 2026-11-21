@@ -48,13 +48,38 @@ body {
 }
 
 .app-shell {
+  position: relative;
+  isolation: isolate;
   background: radial-gradient(ellipse at 15% 0%, rgb(255 255 255 / 0.3), transparent 60%), #dedede;
 }
 
+/* Distant light diffusing outward through the frosted surfaces. */
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 30% 24% at 36% 48%, rgb(239 75 85 / 0.5), rgb(201 51 66 / 0.18) 45%, transparent 80%),
+    radial-gradient(ellipse 26% 32% at 53% 39%, rgb(67 203 135 / 0.42), rgb(36 160 106 / 0.14) 48%, transparent 82%),
+    radial-gradient(ellipse 34% 27% at 65% 56%, rgb(72 126 245 / 0.55), rgb(51 83 211 / 0.18) 48%, transparent 82%);
+  filter: blur(clamp(30px, 5vw, 80px));
+  transform-origin: 50% 48%;
+  animation: mist-spread 24s ease-in-out infinite alternate;
+}
+
+@keyframes mist-spread {
+  from { transform: scale(0.84); opacity: 0.65; }
+  to { transform: scale(1.16); opacity: 1; }
+}
+
 .chat-surface {
-  background: rgb(255 255 255 / 0.62);
+  background: rgb(255 255 255 / 0.52);
   border-color: rgb(255 255 255 / 0.85);
   box-shadow: 0 8px 40px rgb(0 0 0 / 0.04);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
 }
 
 .sidebar-surface {
@@ -97,7 +122,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
   background: radial-gradient(ellipse at 15% 0%, rgb(120 120 120 / 0.12), transparent 55%),
     radial-gradient(ellipse at 85% 100%, rgb(80 80 80 / 0.08), transparent 50%), #101010;
 }
-.dark .chat-surface { background: rgb(26 26 26 / 0.82); border-color: rgb(255 255 255 / 0.06); }
+.dark .chat-surface { background: rgb(26 26 26 / 0.66); border-color: rgb(255 255 255 / 0.06); }
 .dark .sidebar-surface { background: rgb(32 32 32 / 0.72); border-color: rgb(255 255 255 / 0.06); }
 .dark .app-header { background: rgb(28 28 28 / 0.3); }
 .dark .glass-panel { background: rgb(38 38 38 / 0.92); border-color: rgb(255 255 255 / 0.1); }
@@ -196,6 +221,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-shell::before {
+    animation: none;
+    transform: none;
+    opacity: 0.85;
+  }
+
   *,
   *::before,
   *::after {
