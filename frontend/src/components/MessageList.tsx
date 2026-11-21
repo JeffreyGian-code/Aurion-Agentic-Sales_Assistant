@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDown, CornerDownRight } from 'lucide-react'
+import { ArrowDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { PendingRequest } from '../hooks/useChat'
-import type { Conversation, Message } from '../lib/types'
+import type { Conversation } from '../lib/types'
 import { formatDay } from '../lib/utils'
 import { Avatar, Markdown, MessageBubble } from './MessageBubble'
 import { TypingIndicator } from './TypingIndicator'
@@ -13,29 +13,13 @@ interface Props {
   cooldown: number
   budgetExhausted: boolean
   onRetry: (id: string) => void
-  onSuggestion: (text: string) => void
 }
 
-/** Contextual follow-ups based on the latest assistant reply. */
-function followUps(reply: Message): string[] {
-  const t = reply.content.toLowerCase()
-  const out: string[] = []
-  const isList = /\|.*\|/.test(reply.content) || /^\s*(\d+\.|[-*])\s/m.test(reply.content)
-  if (t.includes('emi') && t.includes('tenure')) {
-    out.push('Compare with a 7 year tenure', 'What if the rate is 8.5%?')
-  } else if (isList && /₹|lakh|price/.test(t)) {
-    out.push('Calculate EMI for the cheapest one', 'Show only automatic options', 'Which one has the best mileage?')
-  }
-  if (t.includes('?') && out.length === 0) out.push('Yes, please', 'Show me other options')
-  return out.slice(0, 3)
-}
-
-export function MessageList({ conversation, pending, cooldown, budgetExhausted, onRetry, onSuggestion }: Props) {
+export function MessageList({ conversation, pending, cooldown, budgetExhausted, onRetry }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   const isPendingHere = pending?.conversationId === conversation.id
   const messages = conversation.messages
-  const last = messages[messages.length - 1]
 
   // Keep pinned to the bottom when new content arrives, unless the user scrolled up.
   useEffect(() => {
@@ -55,13 +39,10 @@ export function MessageList({ conversation, pending, cooldown, budgetExhausted, 
     setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
   }
 
-  const suggestions =
-    !isPendingHere && !conversation.ended && last?.role === 'assistant' ? followUps(last) : []
-
   return (
     <div className="relative min-h-0 flex-1">
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-3 py-6 sm:px-6" aria-live="polite">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-8 sm:px-8" aria-live="polite">
           {messages.map((m, i) => {
             const prev = messages[i - 1]
             const showDay = !prev || formatDay(prev.createdAt) !== formatDay(m.createdAt)
@@ -89,7 +70,7 @@ export function MessageList({ conversation, pending, cooldown, budgetExhausted, 
               <div key="streaming" className="flex gap-3" aria-busy="true">
                 <Avatar pulse />
                 <div className="min-w-0 flex-1">
-                  <div className="inline-block max-w-full rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <div className="inline-block max-w-full px-1 py-2 break-words">
                     <Markdown text={pending.reply} />
                   </div>
                   <p className="mt-1 text-xs text-slate-400" role="status">{pending.status}</p>
@@ -98,25 +79,6 @@ export function MessageList({ conversation, pending, cooldown, budgetExhausted, 
             ) : <TypingIndicator key="typing" startedAt={pending.startedAt} status={pending.status} />)}
           </AnimatePresence>
 
-          {suggestions.length > 0 && (
-            <div className="flex flex-wrap gap-2 pl-11">
-              {suggestions.map((s, i) => (
-                <motion.button
-                  key={s}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.25 + i * 0.07 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => onSuggestion(s)}
-                  disabled={cooldown > 0 || budgetExhausted}
-                  className="flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50/60 px-3 py-1.5 text-xs font-medium text-brand-700 transition hover:border-brand-400 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
-                >
-                  <CornerDownRight className="size-3" />
-                  {s}
-                </motion.button>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 

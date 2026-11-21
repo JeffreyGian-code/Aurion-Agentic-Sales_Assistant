@@ -24,26 +24,26 @@ export function ChatHeader({ conversation, health, onRefreshHealth, theme, onCyc
   const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
 
   return (
-    <header className="relative flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white/70 px-3 py-2 backdrop-blur sm:px-5 dark:border-slate-800 dark:bg-slate-900/50">
+    <header className="app-header relative z-10 flex min-h-20 shrink-0 flex-wrap items-center gap-2 px-4 py-4 sm:px-6">
       <button
         onClick={onOpenSidebar}
-        className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+        className="material-control rounded-full p-2 md:hidden"
         aria-label="Open execution dashboard"
       >
         <Menu className="size-5" />
       </button>
 
       <div className="min-w-28 flex-1">
-        <h1 className="truncate text-sm font-semibold sm:text-base">{conversation?.title ?? 'Your vehicle assistant'}</h1>
+        <h1 className="aurion-wordmark truncate text-xl font-medium tracking-tight sm:text-2xl" title={conversation?.title}>Aurion</h1>
         <p className="text-[11px] text-slate-500" aria-live="polite">{calls}/{callLimit} calls used · Renews every 24 hours</p>
       </div>
 
       <button type="button" onClick={onReset} disabled={pending} title="Clear conversation context. Your call count and limits stay the same."
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">
+        className="material-control flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium disabled:opacity-40">
         <RotateCcw className="size-3.5" /> Reset conversation
       </button>
       <button type="button" onClick={onToggleNote} aria-expanded={noteOpen} aria-controls="developer-note"
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        className="material-control flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium">
         <StickyNote className="size-3.5" /> Note
       </button>
 
@@ -56,7 +56,7 @@ export function ChatHeader({ conversation, health, onRefreshHealth, theme, onCyc
       <button
         onClick={onRefreshHealth}
         disabled={health === 'checking'}
-        className="group flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+        className="material-control group flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium"
         title="Check API, database and AI provider status"
       >
         <span className="relative flex size-2">
@@ -81,7 +81,7 @@ export function ChatHeader({ conversation, health, onRefreshHealth, theme, onCyc
 
       <button
         onClick={onCycleTheme}
-        className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+        className="material-control rounded-full p-2.5"
         aria-label={`Theme: ${theme}. Click to change`}
         title={`Theme: ${theme}`}
       >

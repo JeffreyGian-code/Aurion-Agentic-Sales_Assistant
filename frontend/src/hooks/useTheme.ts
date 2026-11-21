@@ -3,14 +3,14 @@ import { useEffect, useState } from 'react'
 export type Theme = 'light' | 'dark' | 'system'
 
 // Same key is read by the inline script in index.html to avoid a flash of the wrong theme.
-const KEY = 'vsa.theme'
+const KEY = 'aurion.theme'
 
 function loadTheme(): Theme {
   try {
     const v = localStorage.getItem(KEY)
-    return v === 'light' || v === 'dark' ? v : 'system'
+    return v === 'light' || v === 'dark' || v === 'system' ? v : 'dark'
   } catch {
-    return 'system'
+    return 'dark'
   }
 }
 
