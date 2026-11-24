@@ -1,3 +1,14 @@
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+
+from pydantic import ValidationError
+
+from app.models.emi import EMIRequest, EMIResult
+
+
+class EMIValidationError(ValueError):
+    """The supplied loan inputs violate the EMIRequest contract."""
+
+
 class FinanceService:
 
     def calculate_emi(
@@ -5,34 +16,42 @@ class FinanceService:
         principal: float,
         annual_rate: float,
         months: int,
-    ) -> dict:
+    ) -> EMIResult:
+        """Validate direct callers and estimate fixed-rate repayments.
 
-        monthly_rate = annual_rate / 12 / 100
-
-        if monthly_rate == 0:
-            emi = principal / months
-        else:
-            emi = (
-                principal
-                * monthly_rate
-                * (1 + monthly_rate) ** months
-                / ((1 + monthly_rate) ** months - 1)
+        Use decimal arithmetic, rounding each output independently to nearest
+        paise (two decimals), with ties away from zero (ROUND_HALF_UP).
+        Totals use the unrounded EMI to avoid accumulated monthly rounding
+        error. No fees or final-payment adjustment are modeled.
+        """
+        try:
+            request = EMIRequest(
+                principal=principal, annual_rate=annual_rate, months=months
             )
+        except ValidationError as exc:
+            raise EMIValidationError(f"Invalid EMI request: {exc}") from exc
 
-        emi = round(emi, 2)
+        amount = Decimal(str(request.principal))
+        rate = Decimal(str(request.annual_rate))
+        with localcontext() as context:
+            # Preserve 1 + rate even for tiny, positive finite float inputs.
+            context.prec = 40 + max(0, -rate.adjusted())
+            monthly_rate = rate / 1200
+            if not monthly_rate:
+                emi = amount / request.months
+            else:
+                # Negative powers avoid the growth term in the usual formula.
+                emi = amount * monthly_rate / (
+                    1 - (1 + monthly_rate) ** (-request.months)
+                )
+            total_payment = max(amount, emi * request.months)
+            total_interest = total_payment - amount
 
-        total_payment = round(
-            emi * months,
-            2,
-        )
+            def rounded(value: Decimal) -> float:
+                return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
-        total_interest = round(
-            total_payment - principal,
-            2,
-        )
-
-        return {
-            "monthly_emi": emi,
-            "total_payment": total_payment,
-            "total_interest": total_interest,
-        }
+            return EMIResult(
+                monthly_emi=rounded(emi),
+                total_payment=rounded(total_payment),
+                total_interest=rounded(total_interest),
+            )

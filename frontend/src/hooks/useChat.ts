@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getChatUsage, sendMessage, USE_MOCK, type ChatUsage } from '../api/client'
+import { getChatUsage, sendMessage, validUsage, USE_MOCK, type ChatUsage } from '../api/client'
 import { ChatError } from '../api/types'
 import type { Conversation, Message, TraceRun } from '../lib/types'
 import { readStorage, titleFrom, uid, writeStorage } from '../lib/utils'
 
 const STORAGE_KEY = 'vsa.conversation'
 const ACTIVE_KEY = 'vsa.activeId'
-const SESSION_KEY = 'vsa.sessionId'
+const SESSION_KEY = 'vsa.serverSession'
 const USAGE_KEY = 'vsa.usage'
-/** Fixed cooldown after a per-IP 429 (Retry-After is not readable cross-origin yet). */
+/** Fallback when a gateway omits the retry interval. */
 export const IP_COOLDOWN_SECONDS = 60
 export interface PendingRequest {
   conversationId: string
@@ -17,6 +17,18 @@ export interface PendingRequest {
   status: string
   activeTools: Record<string, string>
   reply: string
+}
+
+function validConversation(c: Conversation): boolean {
+  return !!c && typeof c.id === 'string' && typeof c.title === 'string' &&
+    Number.isFinite(c.replies) && Array.isArray(c.messages) &&
+    c.messages.every(m => m && typeof m.id === 'string' && typeof m.content === 'string' &&
+      ['user','assistant','error'].includes(m.role) && (!m.retryText || typeof m.retryText === 'string') &&
+      (!m.errorKind || ['cancelled','server','validation','network','timeout','ip-rate-limit','conversation-limit','session-expired','session-limit'].includes(m.errorKind))) &&
+    (c.traces == null || Array.isArray(c.traces) && c.traces.every(r => r && typeof r.input === 'string' &&
+      (!r.reply || typeof r.reply === 'string') && (!r.error || typeof r.error === 'string') &&
+      typeof r.status === 'string' && ['running','cancelled','error','completed'].includes(r.status) &&
+      Array.isArray(r.steps) && r.steps.every(s => s && typeof s.label === 'string' && (!s.tool || typeof s.tool === 'string'))))
 }
 
 function newConversation(firstText: string): Conversation {
@@ -41,18 +53,30 @@ export function useChat() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const saved = readStorage<Conversation[]>(STORAGE_KEY, readStorage<Conversation[]>('vsa.conversations', []))
     const selected = readStorage<string | null>(ACTIVE_KEY, null)
-    const conversation = saved.find((c) => c.id === selected) ?? saved[0]
-    return conversation ? [{ ...conversation, ended: false, traces: (conversation.traces ?? []).map((run) =>
+    const usable = Array.isArray(saved) ? saved.filter(validConversation) : []
+    const conversation = usable.find((c) => c.id === selected) ?? usable[0]
+    const legacyContext = conversation?.sessionId && !USE_MOCK && !readStorage(SESSION_KEY, null)
+    return conversation ? [{ ...conversation, ended: false,
+      ...(legacyContext ? { sessionId: null, messages: [...conversation.messages, msg({
+        role: 'error', errorKind: 'session-expired', content: 'Your earlier messages are saved here. Your next message starts a fresh assistant conversation.',
+      })] } : {}), traces: (conversation.traces ?? []).map((run) =>
       run.status === 'running' ? { ...run, status: 'cancelled', finishedAt: Date.now(), error: 'The page was closed before this request finished.' } : run,
     ) }] : []
   })
   const activeId = conversations[0]?.id ?? null
-  const [sessionId] = useState(() => {
-    const id = readStorage<string | null>(SESSION_KEY, null) ?? conversations[0]?.sessionId ?? uid()
-    writeStorage(SESSION_KEY, id)
-    return id
+  const [sessionId, setSessionId] = useState(() => {
+    const id = readStorage<unknown>(SESSION_KEY, null)
+    return typeof id === 'string' && (USE_MOCK || /^[a-zA-Z0-9_-]{43}$/.test(id)) ? id : null
   })
-  const [usage, setUsage] = useState<ChatUsage>(() => readStorage(USAGE_KEY, { calls: 0, limit: 7, resets_at: null }))
+  const [usage, setUsage] = useState<ChatUsage>(() => {
+    const saved = readStorage(USAGE_KEY, null)
+    return validUsage(saved) && (sessionId || USE_MOCK) ? saved : { calls: 0, limit: 7, resets_at: null }
+  })
+  useEffect(() => {
+    if (!usage.resets_at) return
+    const t = setTimeout(() => setUsage({ calls: 0, limit: usage.limit, resets_at: null }), Math.max(0, usage.resets_at * 1000 - Date.now()))
+    return () => clearTimeout(t)
+  }, [usage])
   const [pending, setPending] = useState<PendingRequest | null>(null)
   const [cooldown, setCooldown] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -63,7 +87,16 @@ export function useChat() {
         ? { calls: 0, limit: 7, resets_at: null } : current)
       return
     }
-    try { setUsage(await getChatUsage(sessionId)) } catch { /* Keep the last known count when offline. */ }
+    if (!sessionId) return
+    try {
+      setUsage(await getChatUsage(sessionId))
+    } catch (error) {
+      if (error instanceof ChatError && error.kind === 'session-expired') {
+        setSessionId(null)
+        writeStorage(SESSION_KEY, null)
+        setUsage({ calls: 0, limit: 7, resets_at: null })
+      }
+    }
   }, [sessionId])
 
   useEffect(() => {
@@ -94,9 +127,10 @@ export function useChat() {
 
   /** Every request continues the same locally persisted conversation. */
   const send = useCallback(
-    async (rawText: string) => {
+    async (rawText: string, previousRequestId?: string) => {
+      const requestId = previousRequestId ?? uid()
       const text = rawText.trim()
-      if (!text || abortRef.current || cooldown > 0 || (usage.calls >= usage.limit && (!usage.resets_at || usage.resets_at * 1000 > Date.now()))) return
+      if (!text || abortRef.current || cooldown > 0 || (!previousRequestId && usage.calls >= usage.limit && (!usage.resets_at || usage.resets_at * 1000 > Date.now()))) return
 
       const conv = active ?? newConversation(text)
       if (!active) setConversations([conv])
@@ -131,21 +165,25 @@ export function useChat() {
             return { ...current, activeTools, status: tools.length ? tools.join(' · ') : progress.label }
           })
         }, (id) => {
-          setUsage((current) => {
+          setSessionId(id)
+          writeStorage(SESSION_KEY, id)
+          if (USE_MOCK && !previousRequestId) setUsage((current) => {
             const expired = current.resets_at !== null && current.resets_at * 1000 <= Date.now()
             return { ...current, calls: (expired ? 0 : current.calls) + 1, resets_at: expired || !current.resets_at ? Date.now() / 1000 + 86400 : current.resets_at }
           })
-          if (!controller.signal.aborted) update(convId, (c) => ({ ...c, sessionId: id, resetContext: false }))
+          if (!USE_MOCK) void getChatUsage(id).then(setUsage).catch(() => {})
+          if (!controller.signal.aborted) update(convId, (c) => ({ ...c, sessionId: id }))
         }, (delta) => {
           if (controller.signal.aborted) return
           setPending((current) => current?.conversationId === convId
             ? { ...current, reply: (delta.reset ? '' : current.reply) + delta.text }
             : current)
-        }, conv.resetContext ?? false)
+        }, conv.resetContext ?? false, requestId)
         updateTrace((run) => ({ ...run, status: 'completed', finishedAt: Date.now(), reply: res.reply }))
         update(convId, (c) => ({
           ...c,
           sessionId: res.session_id,
+          resetContext: false,
           replies: c.replies + 1,
           messages: [...c.messages, msg({ role: 'assistant', content: res.reply })],
           updatedAt: Date.now(),
@@ -157,7 +195,7 @@ export function useChat() {
             ...c,
             messages: [
               ...c.messages,
-              msg({ role: 'error', errorKind: 'cancelled', content: 'You stopped this request.', retryText: text }),
+              msg({ role: 'error', errorKind: 'cancelled', content: 'You stopped this request.', retryText: text, requestId }),
             ],
           }))
           return
@@ -167,13 +205,18 @@ export function useChat() {
             ? err
             : new ChatError('server', 'Something went wrong while processing your request.')
         updateTrace((run) => ({ ...run, status: 'error', finishedAt: Date.now(), error: e.message }))
-        if (e.kind === 'ip-rate-limit') setCooldown(IP_COOLDOWN_SECONDS)
+        if (e.kind === 'ip-rate-limit') setCooldown(e.retryAfter ?? IP_COOLDOWN_SECONDS)
+        if (e.kind === 'session-limit' && e.retryAfter) {
+          const resetsAt = Date.now() / 1000 + e.retryAfter
+          setUsage(current => ({ ...current, calls: current.limit, resets_at: resetsAt }))
+        }
+        if (e.kind === 'session-expired') { setSessionId(null); writeStorage(SESSION_KEY, null) }
         update(convId, (c) => ({
           ...c,
           ended: false,
           messages: [
             ...c.messages,
-            msg({ role: 'error', errorKind: e.kind, content: e.message, retryText: text }),
+            msg({ role: 'error', errorKind: e.kind, content: e.message, retryText: text, requestId }),
           ],
           updatedAt: Date.now(),
         }))
@@ -189,16 +232,16 @@ export function useChat() {
   /** Remove a failed exchange (user message + error) and send it again. */
   const retry = useCallback(
     (errorId: string) => {
-      if (!active || pending || cooldown > 0 || usage.calls >= usage.limit) return
+      if (!active || pending || cooldown > 0) return
       const idx = active.messages.findIndex((m) => m.id === errorId)
       const err = active.messages[idx]
       if (!err?.retryText) return
       const prev = active.messages[idx - 1]
       const drop = new Set([errorId, ...(prev?.role === 'user' ? [prev.id] : [])])
       update(active.id, (c) => ({ ...c, messages: c.messages.filter((m) => !drop.has(m.id)) }))
-      void send(err.retryText)
+      void send(err.retryText, err.requestId)
     },
-    [active, pending, cooldown, usage, send, update],
+    [active, pending, cooldown, send, update],
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])

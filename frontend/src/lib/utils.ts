@@ -58,6 +58,6 @@ export function writeStorage(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value))
   } catch {
-    /* storage full or blocked: ignore */
+    window.dispatchEvent(new Event('vsa-storage-unavailable'))
   }
 }

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import get_agent
 from app.api.main import app
 from app.api.rate_limit import limiter
-from app.tests.test_api import CHAT_LIMIT, FakeAgent, per_window
+from app.tests.test_api import ModelCallLimitExceededError, CHAT_LIMIT, FakeAgent, per_window
 
 
 @pytest.fixture(autouse=True)
@@ -55,19 +55,19 @@ def test_stream_lifecycle_and_session(monkeypatch):
     monkeypatch.setattr(chat, "perf_counter", lambda: next(clock))
     agent = StreamAgent()
     app.dependency_overrides[get_agent] = lambda: agent
-    response = TestClient(app).post("/api/chat/stream", json={"message": "cars", "session_id": "session-a"})
+    response = TestClient(app).post("/api/chat/stream", json={"message": "cars"})
     events = frames(response)
     assert [name for name, _ in events] == ["started", "progress", "progress", "progress", "completed"]
-    assert events[0][1]["session_id"] == "session-a"
+    assert events[0][1]["session_id"] == events[-1][1]["session_id"]
     assert [data["phase"] for name, data in events if name == "progress"] == [
         "processing", "tool_started", "tool_finished",
     ]
     assert events[2][1]["tool"] == "search_vehicles"
     assert events[2][1]["run_id"] == events[3][1]["run_id"]
     assert events[3][1]["duration_ms"] == 125.0
-    assert agent.calls[0][1]["configurable"]["thread_id"] == "session-a"
+    assert agent.calls[0][1]["configurable"]["thread_id"] == events[-1][1]["session_id"]
     assert events[2][1]["input"] == {"request": {"brand": "Honda", "max_price": 1000000}}
-    assert json.loads(events[3][1]["output"]) == {"vehicles": [{"id": 1, "brand": "Honda"}]}
+    assert events[3][1]["output"] == {"vehicles": [{"id": 1, "brand": "Honda"}]}
     assert "response_metadata" not in response.text
     assert "hidden" not in response.text
     assert events[-1][1]["reply"] == "Here are the cars"
@@ -203,7 +203,7 @@ def test_send_disconnect_closes_stream_and_cancels_work():
 
 @pytest.mark.parametrize("error,status", [("Model call limits exceeded", 429), ("secret exception", 500)])
 def test_stream_errors_are_terminal_and_sanitized(error, status):
-    app.dependency_overrides[get_agent] = lambda: StreamAgent(RuntimeError(error))
+    app.dependency_overrides[get_agent] = lambda: StreamAgent(ModelCallLimitExceededError(5, 5, None, 5) if status == 429 else RuntimeError(error))
     events = frames(TestClient(app).post("/api/chat/stream", json={"message": "Hi"}))
     assert events[-1][0] == "error"
     assert events[-1][1]["status"] == status
@@ -215,6 +215,7 @@ def test_stream_and_legacy_share_rate_limit():
     app.dependency_overrides[get_agent] = lambda: FakeAgent()
     client = TestClient(app)
     for _ in range(per_window(CHAT_LIMIT)):
+        client.cookies.clear()
         assert client.post("/api/chat", json={"message": "Hi"}).status_code == 200
     assert client.post("/api/chat/stream", json={"message": "Hi"}).status_code == 429
 
@@ -260,5 +261,25 @@ def test_real_langchain_agent_stream():
     assert events[-1][1]["reply"] == "Here are your vehicles."
     assert events[0][1]["session_id"] == events[-1][1]["session_id"]
     assert any(data.get("phase") == "tool_started" and data["tool"] == "search_vehicles" for _, data in events)
-    assert any(data.get("phase") == "tool_finished" and data["output"] == "One matching vehicle" for _, data in events)
+    assert any(data.get("phase") == "tool_finished" and data["output"] is None for _, data in events)
     assert [data["text"] for name, data in events if name == "delta"] == ["Here are ", "your vehicles."]
+
+
+def test_stalled_run_times_out_and_releases_session(monkeypatch):
+    from app.api.routes import chat
+    monkeypatch.setattr(chat, "TURN_TIMEOUT_SECONDS", 0.04)
+
+    class Stalled:
+        async def astream_events(self, *args, **kwargs):
+            yield {"event": "on_chat_model_start"}
+            await asyncio.Event().wait()
+
+    with TestClient(app) as client:
+        app.dependency_overrides[get_agent] = lambda: Stalled()
+        events = frames(client.post("/api/chat/stream", json={"message": "cars", "request_id": "one"}))
+        assert events[-1][0] == "error" and events[-1][1]["status"] == 504
+        app.dependency_overrides[get_agent] = lambda: StreamAgent()
+        retried = frames(client.post("/api/chat/stream", json={"message": "cars", "request_id": "one"}))
+        assert retried[-1][0] == "completed"
+        session = retried[-1][1]["session_id"]
+        assert client.get(f"/api/chat/usage/{session}").json()["calls"] == 1

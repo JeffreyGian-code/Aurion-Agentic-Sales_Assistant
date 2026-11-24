@@ -1,12 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Any, Literal
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    request_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     message: str = Field(min_length=1, max_length=2000)
     reset_context: bool = False
     session_id: str | None = Field(
-        default=None,
+        default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$",
         description="Conversation id. Omit to start a new conversation.",
     )
 

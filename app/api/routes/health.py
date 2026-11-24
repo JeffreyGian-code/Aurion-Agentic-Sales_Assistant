@@ -1,5 +1,9 @@
 import asyncio
 import os
+import logging
+from fastapi import Depends, HTTPException
+from app.api.dependencies import get_agent
+from app.api.chat_usage import check_storage
 
 import httpx
 from fastapi import APIRouter, Request
@@ -27,9 +31,10 @@ def check_database() -> dict[str, str]:
             connect_args={"connect_timeout": 3, "options": "-c statement_timeout=3000"},
         )
         with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
+            connection.execute(text("SELECT id, model, brand, variant, price, vehicle_type FROM vehicles LIMIT 0"))
         return {"status": "ok", "detail": "Connected & query succeeded."}
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Dependency probe failed (%s)", type(exc).__name__)
         return {"status": "unavailable", "detail": "Connection or query failed."}
     finally:
         if engine is not None:
@@ -49,7 +54,8 @@ async def check_ai() -> dict[str, str]:
         if response.status_code == 200 and isinstance(response.json().get("data"), dict):
             return {"status": "ok", "detail": "Reachable & key accepted."}
         return {"status": "unavailable", "detail": "Provider access check failed."}
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Dependency probe failed (%s)", type(exc).__name__)
         return {"status": "unavailable", "detail": "Could not verify provider access."}
 
 
@@ -62,3 +68,12 @@ async def service_health(request: Request) -> dict:
         "database": database,
         "ai": ai,
     }
+
+@router.get("/ready")
+@limiter.limit("6/minute")
+async def readiness(request: Request, agent=Depends(get_agent)):
+    database, ai, _ = await asyncio.gather(asyncio.to_thread(check_database), check_ai(),
+                                           asyncio.to_thread(check_storage))
+    if database["status"] != "ok" or ai["status"] != "ok":
+        raise HTTPException(503, "A chat dependency is unavailable.")
+    return {"status": "ready"}

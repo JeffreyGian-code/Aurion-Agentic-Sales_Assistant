@@ -180,8 +180,9 @@ Step by step:
 1. **Rate limit.** slowapi checks the caller's IP against `RATE_LIMIT_CHAT`
    (default `10/minute;100/day`). Over the limit returns **429** with a
    `Retry-After` header.
-2. **Session.** If no `session_id` was sent, a new UUID is created. It is used
-   as the agent's `thread_id`, which selects the right chat history.
+2. **Session.** The API issues a session ID and an HttpOnly ownership cookie.
+   SQLite stores the budget, completed messages and request receipts. Each
+   generation reads the last completed history and commits its reply atomically.
 3. **LLM reasoning.** The LLM reads the prompt and decides it needs data. It
    converts "10 lakh" to `1000000` (as the prompt instructs) and asks to call
    `search_vehicles`.
@@ -192,15 +193,19 @@ Step by step:
 6. **Response.** The API returns `{reply, session_id}`. The frontend sends the
    same `session_id` with the next message to continue the conversation.
 
-**Errors:** if the conversation hits the model-call limit, the API returns
-**429** and the frontend should start a new conversation. Any other failure is
-logged and returned as **500** with a generic message.
+The error code distinguishes IP throttling, an exhausted daily budget and the
+per-request model limit. The first two carry retry timing. Invalid inputs
+return 422, overlapping requests return 409 and unavailable dependencies
+can return 503. After streaming begins, failures arrive as terminal error events.
 
 ## 5. Public API surface
 
 | Endpoint | Calls | Notes |
 |----------|-------|-------|
 | `POST /api/chat` | LangChain agent | Rate limited per IP (`RATE_LIMIT_CHAT`, default `10/minute;100/day`) |
+| `POST /api/chat/stream` | LangChain agent | Streams progress, text and a terminal outcome |
+| `GET /api/chat/usage/{session_id}` | SQLite | Requires the ownership cookie |
+| `GET /api/ready` | Agent configuration, inventory, provider and SQLite | Returns 503 when unavailable |
 | `GET /api/health` | none | Liveness check, not rate limited |
 
 Vehicle search (`search_vehicles`), vehicle details (`get_vehicle_details`) and
@@ -216,9 +221,8 @@ both the LLM and the database.
 - **Security**: secrets live in `.env` (git-ignored); SQL uses bound
   parameters; CORS allows only configured origins; per-IP rate limiting
   protects the paid LLM endpoint.
-- **Scaling note**: chat history and rate-limit counters are stored in process
-  memory. With several workers or servers, move rate limits to Redis
-  (`RATE_LIMIT_STORAGE_URI`) and the chat history to a shared checkpointer.
+- API workers need access to the same conversation database. For multiple workers,
+  configure shared per-IP counters with `RATE_LIMIT_STORAGE_URI`.
 - **Observability**: optional LangSmith tracing (`LANGSMITH_TRACING=true`)
   records every LLM and tool call.
 

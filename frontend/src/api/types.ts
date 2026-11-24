@@ -35,6 +35,8 @@ export interface ApiError {
 }
 
 export type ChatErrorKind =
+  | 'session-limit'
+  | 'session-expired'
   | 'validation'
   | 'ip-rate-limit'
   | 'conversation-limit'
@@ -46,10 +48,13 @@ export class ChatError extends Error {
   readonly kind: ChatErrorKind
   readonly status?: number
 
-  constructor(kind: ChatErrorKind, message: string, status?: number) {
+  readonly retryAfter?: number
+
+  constructor(kind: ChatErrorKind, message: string, status?: number, retryAfter?: number) {
     super(message)
     this.name = 'ChatError'
     this.kind = kind
+    this.retryAfter = retryAfter
     this.status = status
   }
 }

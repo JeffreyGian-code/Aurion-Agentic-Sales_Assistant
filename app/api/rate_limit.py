@@ -53,5 +53,5 @@ def rate_limit_exceeded_handler(
         content={
             "detail": "Too many requests from your IP. Please try again later."
         },
-        headers={"Retry-After": str(_retry_after_seconds(request, exc))},
+        headers={"X-Error-Code": "ip-rate-limit", "Retry-After": str(_retry_after_seconds(request, exc))},
     )

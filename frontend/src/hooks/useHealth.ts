@@ -30,8 +30,8 @@ export function useHealth() {
       const result = await checkHealth()
       setServices(result)
       setStatus(Object.values(result).every((check) => check.status === 'ok') ? 'online' : 'degraded')
-    } catch {
-      setStatus('offline')
+    } catch (error) {
+      setStatus(error instanceof TypeError ? 'offline' : 'degraded')
       setServices({
         api: { status: 'unknown', detail: 'Status check failed or timed out. Try again shortly.' },
         database: { status: 'unknown', detail: 'Could not check through the API.' },

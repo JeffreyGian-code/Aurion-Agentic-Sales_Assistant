@@ -82,3 +82,18 @@ def test_structured_tool_passes_range_and_order(catalogue):
     }})
     assert [v.id for v in results] == [3, 2]
     assert SearchRequest().sort_order == "price_asc"
+
+
+def test_tool_handles_inventory_outage_and_invalid_id(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    tools = AgentTools()
+
+    def unavailable(vehicle_id):
+        raise OperationalError("sensitive statement", {}, RuntimeError("internal details"))
+
+    monkeypatch.setattr(tools.vehicle_service, "get_by_id", unavailable)
+    details = next(t for t in tools.get_tools() if t.name == "get_vehicle_details")
+    assert details.invoke({"vehicle_id": 1}) == "Inventory is temporarily unavailable."
+    with pytest.raises(ValidationError):
+        details.invoke({"vehicle_id": True})

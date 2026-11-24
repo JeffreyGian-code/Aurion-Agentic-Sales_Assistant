@@ -5,7 +5,6 @@ from langchain_openrouter import ChatOpenRouter
 from langgraph.checkpoint.memory import InMemorySaver
 from app.tools.agent_tools import AgentTools
 from app.prompts.prompt_loader import load_prompt
-import inspect
 
 load_dotenv()
 checkpointer = InMemorySaver()
@@ -15,19 +14,24 @@ system_prompt = load_prompt("vehicle_assistant.md")
 model = ChatOpenRouter(
     model="nvidia/nemotron-3.5-lightning:free",
     base_url="https://openrouter.ai/api/v1",
-    temperature=0,
+    temperature=0.7,
+    request_timeout=30000,
+    max_retries=0,
     streaming=True,
 )
 
-agent = create_agent(
-    model=model,
-    tools=agent_tools.get_tools(),
-    system_prompt=system_prompt,
-    middleware=[
-        ModelCallLimitMiddleware(
-            run_limit=5,
-            exit_behavior="error",
-        )
-    ],
-    checkpointer=checkpointer,
-)
+def build_agent(checkpointer=None):
+    return create_agent(
+        model=model,
+        tools=agent_tools.get_tools(),
+        system_prompt=system_prompt,
+        middleware=[
+            ModelCallLimitMiddleware(
+                run_limit=5,
+                exit_behavior="error",
+            )
+        ],
+        checkpointer=checkpointer,
+    )
+
+agent = build_agent(checkpointer)

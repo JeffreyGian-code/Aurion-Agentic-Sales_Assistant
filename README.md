@@ -135,6 +135,9 @@ with `database/schema.sql` and `database/seed.sql`, as CI does. The suite uses
 the original catalogue and inserts a temporary variant record for one test;
 keep tests separate from databases you edit or use for deployment.
 
+For the opt-in evaluation of real model behavior, see the
+[agent test suite guide](docs/test-suite-doc.md).
+
 ## Continuous integration
 
 See [the GitHub Actions guide](docs/github-actions.md) for a simple explanation
@@ -175,7 +178,9 @@ Deployment is not part of this validation workflow.
 ## Notes on the implementation
 
 - Each browser session gets 7 chat requests per 24-hour window, starting with its first request. Accepted requests count even if generation fails or is cancelled. Reset conversation clears chat context while keeping the session budget and per-IP limits. The header displays calls used.
-- Session budgets persist in `.chat-usage.sqlite3`. Set `CHAT_USAGE_DATABASE` to a writable persistent file path in deployment to retain counts across restarts; servers sharing this file share the budget. Conversation history still uses the agent's in-memory checkpointer.
+- Session budgets persist in `.chat-usage.sqlite3`. Set `CHAT_USAGE_DATABASE` to a writable persistent file path in deployment to retain counts across restarts; servers sharing this file share the budget. Completed API conversation history and request receipts persist in the same SQLite file. The CLI keeps history in memory.
+- Omit `session_id` on the first request and retain the returned cookies for chat and usage calls. The API issues a session identifier and a separate HttpOnly ownership cookie. Legacy browser transcripts remain local and start fresh server context on their next request. Anonymous sessions remain subject to per-IP limits.
+- A stable `request_id` lets either chat endpoint replay a completed reply without spending another session call. A failed generation can be attempted again against the last completed history with the same request ID and shares the original session charge. Every HTTP attempt still counts toward the per-IP limit. Overlapping or superseded attempts return HTTP 409. Use `/api/health` for liveness and `/api/ready` for dependency readiness.
 - The developer note opens on arrival and can be reopened with **Note**. System status results dismiss on click or after 5 seconds.
 - Queries use SQLAlchemy bound parameters (`:brand`, `:max_price`, …) rather than string interpolation, preventing SQL injection.
 - Connections come from a SQLAlchemy engine with `pool_pre_ping=True` (`app/database.py`) and are released by context managers after each call.

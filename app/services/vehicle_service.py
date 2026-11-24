@@ -1,6 +1,13 @@
-from app.models.SearchRequest import SortOrder
+from app.models.SearchRequest import SearchRequest, SortOrder
+from pydantic import Field, TypeAdapter
+from typing import Annotated
+
 from app.models.vehicle import Vehicle
 from app.repositories.vehicle_repository import VehicleRepository
+
+
+VehicleId = Annotated[int, Field(strict=True, gt=0, le=2147483647)]
+vehicle_id_adapter = TypeAdapter(VehicleId)
 
 
 class VehicleService:
@@ -19,7 +26,7 @@ class VehicleService:
         sort_order: SortOrder = "price_asc",
     ) -> list[Vehicle]:
 
-        return self.repository.search(
+        criteria = SearchRequest(
             brand=brand,
             max_price=max_price,
             vehicle_type=vehicle_type,
@@ -29,9 +36,11 @@ class VehicleService:
             sort_order=sort_order,
         )
 
+        return self.repository.search(**criteria.model_dump())
+
     def get_by_id(
         self,
         vehicle_id: int,
     ) -> Vehicle | None:
 
-        return self.repository.get_by_id(vehicle_id)
+        return self.repository.get_by_id(vehicle_id_adapter.validate_python(vehicle_id))
