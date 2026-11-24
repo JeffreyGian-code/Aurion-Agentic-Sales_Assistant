@@ -58,7 +58,7 @@ export function MessageList({ conversation, pending, cooldown, budgetExhausted, 
                 <MessageBubble
                   message={m}
                   onRetry={onRetry}
-                  canRetry={!pending && !budgetExhausted && i === messages.length - 1}
+                  canRetry={!pending && (!budgetExhausted || (!!m.requestId && m.errorKind !== "session-limit")) && i === messages.length - 1}
                   cooldown={cooldown}
                 />
               </div>

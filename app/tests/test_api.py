@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from limits import parse_many
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 
 from app.api.dependencies import get_agent
 from app.api.main import app
@@ -68,16 +69,17 @@ def test_chat_starts_new_session(client):
 def test_chat_reuses_session(client):
     agent = use_agent(FakeAgent())
 
+    session = client.post("/api/chat", json={"message": "Hello"}).json()["session_id"]
     response = client.post(
-        "/api/chat", json={"message": "Hi", "session_id": "abc"}
+        "/api/chat", json={"message": "Hi", "session_id": session}
     )
 
-    assert response.json()["session_id"] == "abc"
-    assert agent.calls[0][1]["configurable"]["thread_id"] == "abc"
+    assert response.json()["session_id"] == session
+    assert agent.calls[0][1]["configurable"]["thread_id"] == session
 
 
 def test_chat_limit_reached(client):
-    use_agent(FakeAgent(error=RuntimeError("Model call limits exceeded: 5")))
+    use_agent(FakeAgent(error=ModelCallLimitExceededError(5, 5, None, 5)))
 
     response = client.post("/api/chat", json={"message": "Hi"})
 
@@ -98,6 +100,7 @@ def test_chat_rate_limited_per_ip(client):
     allowed = per_window(CHAT_LIMIT)
 
     for _ in range(allowed):
+        client.cookies.clear()
         assert client.post("/api/chat", json={"message": "Hi"}).status_code == 200
 
     response = client.post("/api/chat", json={"message": "Hi"})
@@ -135,3 +138,20 @@ def test_health_is_never_rate_limited(client):
 def test_only_chat_and_health_are_exposed(client, method, path):
     # Vehicle search/details and EMI are agent tools, not public endpoints.
     assert getattr(client, method)(path).status_code == 404
+
+
+@pytest.mark.parametrize("payload", [{"message": "   "}, {"message": "Hi", "reset_context": "yes"}, {"message": "Hi", "typo": 1}])
+def test_invalid_chat_request(client, payload):
+    use_agent(FakeAgent())
+    assert client.post("/api/chat", json=payload).status_code == 422
+
+
+def test_usage_store_failure_returns_json(client, monkeypatch, tmp_path):
+    from app.api import chat_usage
+    monkeypatch.setattr(chat_usage, "DATABASE_PATH", str(tmp_path / "missing" / "usage.db"))
+    use_agent(FakeAgent())
+    for route in ("/api/chat", "/api/chat/stream"):
+        response = client.post(route, json={"message": "Hi"})
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Conversation storage is temporarily unavailable."
+        assert response.headers["X-Request-ID"]

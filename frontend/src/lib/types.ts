@@ -21,6 +21,7 @@ export interface Message {
   /** Only for role === 'error' */
   errorKind?: ChatErrorKind | 'cancelled'
   /** Only for role === 'error': the user text that failed, so it can be retried */
+  requestId?: string
   retryText?: string
 }
 

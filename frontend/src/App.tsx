@@ -11,9 +11,16 @@ import { useHealth } from './hooks/useHealth'
 import { useTheme } from './hooks/useTheme'
 
 export default function App() {
-  const chat = useChat()
+
   const health = useHealth()
   const { theme, cycle } = useTheme()
+  const [storageFailed, setStorageFailed] = useState(false)
+  useEffect(() => {
+    const warn = () => setStorageFailed(true)
+    window.addEventListener('vsa-storage-unavailable', warn)
+    return () => window.removeEventListener('vsa-storage-unavailable', warn)
+  }, [])
+  const chat = useChat()
   const [draft, setDraft] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(true)
@@ -139,6 +146,7 @@ export default function App() {
             )}
           </div>
 
+          {storageFailed && <p role="status">Browser storage is unavailable. Your transcript may be lost when you leave.</p>}
           <Composer
             value={draft}
             onChange={setDraft}

@@ -7,7 +7,9 @@ from app.repositories.postgres_vehicle_repository import (
     PostgresVehicleRepository,
 )
 from app.services.finance_service import FinanceService
-from app.services.vehicle_service import VehicleService
+from app.services.vehicle_service import VehicleService, VehicleId
+from sqlalchemy.exc import SQLAlchemyError
+from langchain_core.tools import ToolException
 
 
 class AgentTools:
@@ -26,23 +28,29 @@ class AgentTools:
     ) -> list[Vehicle]:
         """Search vehicles using the provided search criteria."""
 
-        return self.vehicle_service.search(
-            brand=request.brand,
-            model=request.model,
-            variant=request.variant,
-            max_price=request.max_price,
-            vehicle_type=request.vehicle_type,
-            min_price=request.min_price,
-            sort_order=request.sort_order,
-        )
+        try:
+            return self.vehicle_service.search(
+                brand=request.brand,
+                model=request.model,
+                variant=request.variant,
+                max_price=request.max_price,
+                vehicle_type=request.vehicle_type,
+                min_price=request.min_price,
+                sort_order=request.sort_order,
+            )
+        except SQLAlchemyError as exc:
+            raise ToolException("Inventory is temporarily unavailable.") from exc
 
     def get_vehicle_details(
         self,
-        vehicle_id: int,
+        vehicle_id: VehicleId,
     ):
         """Get detailed information about a vehicle using its ID."""
 
-        vehicle = self.vehicle_service.get_by_id(vehicle_id)
+        try:
+            vehicle = self.vehicle_service.get_by_id(vehicle_id)
+        except SQLAlchemyError as exc:
+            raise ToolException("Inventory is temporarily unavailable.") from exc
 
         if vehicle is None:
             return "Vehicle not found."
@@ -66,6 +74,7 @@ class AgentTools:
     def get_tools(self):
         return [
             StructuredTool.from_function(
+                handle_tool_error=True,
                 func=self.search_vehicles,
                 name="search_vehicles",
                 description=(
@@ -77,6 +86,7 @@ class AgentTools:
                 ),
             ),
             StructuredTool.from_function(
+                handle_tool_error=True,
                 func=self.get_vehicle_details,
                 name="get_vehicle_details",
                 description=(
@@ -85,6 +95,7 @@ class AgentTools:
                 ),
             ),
             StructuredTool.from_function(
+                handle_tool_error=True,
                 func=self.calculate_emi,
                 name="calculate_emi",
                 args_schema=EMIRequest,

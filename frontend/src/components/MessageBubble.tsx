@@ -122,6 +122,8 @@ export function Avatar({ pulse = false }: { pulse?: boolean }) {
 }
 
 const ERROR_META: Record<ChatErrorKind | 'cancelled', { title: string; icon: typeof AlertTriangle; tone: 'red' | 'amber' }> = {
+  'session-limit': { title: 'Daily session limit reached', icon: Clock, tone: 'amber' },
+  'session-expired': { title: 'Conversation expired', icon: Clock, tone: 'amber' },
   validation: { title: 'Message not accepted', icon: AlertTriangle, tone: 'amber' },
   'ip-rate-limit': { title: 'Slow down a little', icon: Clock, tone: 'amber' },
   'conversation-limit': { title: 'Request processing limit reached', icon: Sparkles, tone: 'amber' },

@@ -5,21 +5,23 @@ export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000/a
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
 const REQUEST_TIMEOUT_MS = 60_000
-const CONVERSATION_LIMIT_HINT = 'new conversation'
 
 function detailToText(detail: ApiError['detail'] | undefined, fallback: string): string {
   if (!detail) return fallback
   if (typeof detail === 'string') return detail
-  return detail.map((d) => d.msg).join('; ') || fallback
+  if (!Array.isArray(detail)) return fallback
+  return detail.filter(d => d && typeof d.msg === "string").map((d) => d.msg).join('; ') || fallback
 }
 
-function toChatError(status: number, detail: ApiError['detail'] | undefined): ChatError {
+function toChatError(status: number, detail: ApiError['detail'] | undefined, code?: string | null, retryAfter?: number): ChatError {
   const text = detailToText(detail, 'Something went wrong while processing your request.')
+  if (code === 'session-expired') return new ChatError('session-expired', text, status)
+  if (code === 'session-limit') return new ChatError('session-limit', text, status, retryAfter)
+  if (status === 504) return new ChatError('timeout', text, status)
+  if (code === 'conversation-limit') return new ChatError('conversation-limit', text, status)
   if (status === 422) return new ChatError('validation', text, status)
   if (status === 429) {
-    return (text.toLowerCase().includes(CONVERSATION_LIMIT_HINT) || text.toLowerCase().includes('processing limit'))
-      ? new ChatError('conversation-limit', text, status)
-      : new ChatError('ip-rate-limit', text, status)
+    return new ChatError('ip-rate-limit', text, status, retryAfter)
   }
   return new ChatError('server', text, status)
 }
@@ -36,6 +38,7 @@ export async function sendMessage(
   onStarted?: (sessionId: string) => void,
   onDelta?: (delta: ChatDelta) => void,
   resetContext = false,
+  requestId?: string,
 ): Promise<ChatResponse> {
   if (USE_MOCK) {
     onProgress?.({ phase: 'processing', label: 'Waiting for simulated response…' })
@@ -57,6 +60,7 @@ export async function sendMessage(
     }, REQUEST_TIMEOUT_MS)
   }
   resetTimeout()
+  const deadline = setTimeout(() => { timedOut = true; controller.abort() }, 120_000)
   const onExternalAbort = () => controller.abort()
   externalSignal?.addEventListener('abort', onExternalAbort)
   if (externalSignal?.aborted) controller.abort()
@@ -65,9 +69,9 @@ export async function sendMessage(
     let res: Response
     try {
       res = await fetch(`${API_URL}/chat/stream`, {
-        method: 'POST',
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message.trim(), session_id: sessionId ?? null, reset_context: resetContext }),
+        body: JSON.stringify({ message: message.trim(), session_id: sessionId ?? null, reset_context: resetContext, request_id: requestId }),
         signal: controller.signal,
       })
     } catch (err) {
@@ -80,7 +84,7 @@ export async function sendMessage(
 
     if (!res.ok) {
       const body: Partial<ApiError> = await res.json().catch(() => ({ detail: res.statusText }))
-      throw toChatError(res.status, body.detail)
+      throw toChatError(res.status, body?.detail, res.headers.get("X-Error-Code"), Number(res.headers.get("Retry-After")) || undefined)
     }
 
     if (!res.body) throw new ChatError('server', 'The server did not return a response stream.')
@@ -101,11 +105,22 @@ export async function sendMessage(
           const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
           const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n')
           if (!data) continue // SSE heartbeat comment.
-          const payload = JSON.parse(data)
+          const invalid = () => new ChatError('server', 'The server returned an invalid response.')
+          let payload
+          try { payload = JSON.parse(data) } catch { throw invalid() }
+          if (!payload || typeof payload !== 'object') throw invalid()
+          if ((event === 'started' || event === 'completed') && (typeof payload.session_id !== 'string' || !payload.session_id)) throw invalid()
+          if (sessionId && (event === 'started' || event === 'completed') && payload.session_id !== sessionId) throw invalid()
+          if (event === 'completed' && (typeof payload.reply !== 'string' || !payload.reply.trim())) throw invalid()
+          if (event === 'progress' && (!['processing','writing','tool_started','tool_finished','tool_failed'].includes(payload.phase) || typeof payload.label !== 'string' ||
+              ['tool','run_id'].some(key => payload[key] != null && typeof payload[key] !== 'string') ||
+              (payload.duration_ms != null && !Number.isFinite(payload.duration_ms)))) throw invalid()
+          if (event === 'delta' && (typeof payload.text !== 'string' || (payload.reset !== undefined && typeof payload.reset !== 'boolean'))) throw invalid()
+          if (event === 'error' && (!Number.isInteger(payload.status) || typeof payload.detail !== 'string')) throw invalid()
           if (event === 'started') onStarted?.(payload.session_id)
           if (event === 'progress') onProgress?.(payload as ChatProgress)
           if (event === 'delta') onDelta?.(payload as ChatDelta)
-          if (event === 'error') throw toChatError(payload.status, payload.detail)
+          if (event === 'error') throw toChatError(payload.status, payload.detail, payload.code)
           if (event === 'completed') return payload as ChatResponse
         }
       }
@@ -121,6 +136,7 @@ export async function sendMessage(
     throw new ChatError('network', 'The response connection was interrupted. Please try again.')
   } finally {
     clearTimeout(timeout)
+    clearTimeout(deadline)
     externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
@@ -136,10 +152,19 @@ export interface ChatUsage {
   resets_at: number | null
 }
 
+export function validUsage(value: unknown): value is ChatUsage {
+  if (!value || typeof value !== 'object') return false
+  const u = value as ChatUsage
+  return Number.isInteger(u.calls) && Number.isInteger(u.limit) && u.limit > 0 && u.calls >= 0 && u.calls <= u.limit &&
+    (u.calls === 0 ? u.resets_at === null : Number.isFinite(u.resets_at))
+}
+
 export async function getChatUsage(sessionId: string): Promise<ChatUsage> {
-  const res = await fetch(`${API_URL}/chat/usage/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(12_000) })
-  if (!res.ok) throw new Error('Could not check usage')
-  return res.json()
+  const res = await fetch(`${API_URL}/chat/usage/${encodeURIComponent(sessionId)}`, { credentials: "include", signal: AbortSignal.timeout(12_000) })
+  if (!res.ok) throw toChatError(res.status, 'Could not check usage', res.headers.get('X-Error-Code'))
+  const value = await res.json()
+  if (!validUsage(value)) throw new Error("Invalid usage response")
+  return value
 }
 
 export interface ServiceHealth {

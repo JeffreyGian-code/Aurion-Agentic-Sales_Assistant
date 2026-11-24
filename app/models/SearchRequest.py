@@ -1,17 +1,18 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 SortOrder = Literal["price_asc", "price_desc"]
 
 
 class SearchRequest(BaseModel):
-    brand: str | None = None
-    model: str | None = None
+    model_config = ConfigDict(strict=True, extra="forbid", str_strip_whitespace=True, str_min_length=1, str_max_length=120)
+    brand: str | None = Field(default=None, max_length=60)
+    model: str | None = Field(default=None, max_length=120)
     max_price: int | None = Field(default=None, ge=0)
-    vehicle_type: str | None = None
-    variant: str | None = None
+    vehicle_type: str | None = Field(default=None, max_length=40)
+    variant: str | None = Field(default=None, max_length=100)
     min_price: int | None = Field(default=None, ge=0)
     sort_order: SortOrder = "price_asc"
 

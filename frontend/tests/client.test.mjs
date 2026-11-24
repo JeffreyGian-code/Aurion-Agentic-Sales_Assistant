@@ -57,7 +57,7 @@ test('reads fragmented SSE, heartbeats, tool events, Unicode, and final reply', 
 
 test('maps streamed conversation-limit errors and HTTP rate limits', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', async () => stream(frame('error', {
-    status: 429, detail: 'Please start a new conversation.',
+    status: 429, code: 'conversation-limit', detail: 'Please start a new conversation.',
   })))
   await assert.rejects(sendMessage('Hi'), (error) => error.kind === 'conversation-limit')
   fetch.mock.mockImplementation(async () => new Response(JSON.stringify({ detail: 'Too many requests.' }), { status: 429 }))
@@ -112,4 +112,14 @@ test('caller cancellation aborts the streaming request', async (t) => {
     },
   })))
   await assert.rejects(sendMessage('Hi', null, controller.signal), (error) => error.name === 'AbortError')
+})
+
+
+test('classifies server quota codes and rejects malformed completion data', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(
+    JSON.stringify({ detail: 'Budget used' }), { status: 429, headers: { 'X-Error-Code': 'session-limit', 'Retry-After': '7200' } },
+  ))
+  await assert.rejects(sendMessage('Hi'), e => e.kind === 'session-limit' && e.retryAfter === 7200)
+  fetch.mock.mockImplementation(async () => stream(frame('completed', { reply: {} })))
+  await assert.rejects(sendMessage('Hi'), e => e.kind === 'server')
 })

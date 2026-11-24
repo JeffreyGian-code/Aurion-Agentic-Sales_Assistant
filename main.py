@@ -1,59 +1,35 @@
-from app.agents.agent import agent
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from app.api.schemas import ChatRequest
+from pydantic import ValidationError
 
 
-config = {
-    "configurable": {
-        "thread_id": "user-123"
-    }
-}
-
-
-
-while True:
-    user_input = input("You: ")
-
-    if user_input.lower() == "exit":
-        break
-
+def main():
     try:
-        final_message = None
+        from app.agents.agent import build_agent
+        from app.api.routes.chat import final_reply
+        agent = build_agent()
+    except Exception:
+        print("Chat could not start. Check database and provider configuration.")
+        return
+    history = []
+    while True:
+        try:
+            raw = input("You: ").strip()
+            if raw.lower() == "exit":
+                break
+            request = ChatRequest(message=raw)
+            result = agent.invoke({"messages": [*history, {"role": "user", "content": request.message}]})
+            print("AI:", final_reply(result))
+            history = result["messages"]
+        except (EOFError, KeyboardInterrupt):
+            break
+        except ValidationError:
+            print("Enter a message between 1 and 2000 characters.")
+        except ModelCallLimitExceededError:
+            print("The processing limit was reached. Try a simpler question.")
+        except Exception:
+            print("The assistant could not finish this request.")
 
-        for update in agent.stream(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": user_input,
-                    }
-                ]
-            },
-            config=config,
-        ):
-            if "model" in update:
-                messages = update["model"].get("messages", [])
 
-                if messages:
-                    final_message = messages[-1]
-
-        if final_message:
-            print("AI:", final_message.content)
-        else:
-            print("AI: I was unable to generate a response.")
-
-    except Exception as e:
-        error_message = str(e)
-
-        if "Model call limits exceeded" in error_message:
-            print(
-                "AI: Sorry, I couldn't complete that request "
-                "because the processing limit was reached."
-            )
-
-        else:
-            print(
-                "AI: Sorry, something went wrong while "
-                "processing your request."
-            )
-
-        # Developer-facing error
-        print(f"[DEBUG] {type(e).__name__}: {e}")
+if __name__ == "__main__":
+    main()
