@@ -135,6 +135,9 @@ with `database/schema.sql` and `database/seed.sql`, as CI does. The suite uses
 the original catalogue and inserts a temporary variant record for one test;
 keep tests separate from databases you edit or use for deployment.
 
+For the opt-in evaluation of real model behavior, see the
+[agent test suite guide](docs/test-suite-doc.md).
+
 ## Continuous integration
 
 See [the GitHub Actions guide](docs/github-actions.md) for a simple explanation
