@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#0ea5e9"/><path fill="#fff" d="M17 38v-6l4-9c.6-1.4 2-2 3.4-2h15.2c1.4 0 2.8.6 3.4 2l4 9v6c0 1.1-.9 2-2 2h-1a5 5 0 0 1-10 0h-4a5 5 0 0 1-10 0h-1c-1.1 0-2-.9-2-2zm7.5-15-3 8h21l-3-8h-15zM24 37a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zm16 0a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="charcoal" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3a3a3a"/><stop offset="1" stop-color="#262626"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="20" fill="url(#charcoal)"/>
+  <path d="M16.5 47 27.5 17H36.5L47.5 47H40.5L38.3 40.5H25.7L23.5 47ZM27.7 34.5H36.3L32 22Z" fill="white" fill-rule="evenodd"/>
+</svg>

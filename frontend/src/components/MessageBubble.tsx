@@ -1,11 +1,12 @@
 import { motion } from 'motion/react'
-import { AlertTriangle, Bot, Check, Clock, Copy, PlugZap, RotateCcw, Sparkles, Square, User, WifiOff } from 'lucide-react'
+import { AlertTriangle, Check, Clock, Copy, PlugZap, RotateCcw, Sparkles, Square, User, WifiOff } from 'lucide-react'
 import { memo, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatErrorKind } from '../api/types'
 import type { Message } from '../lib/types'
 import { cn, formatTime } from '../lib/utils'
+import { AurionLogo } from './AurionLogo'
 
 const mdComponents: Components = {
   table: ({ children }) => (
@@ -54,7 +55,7 @@ function UserBubble({ message }: { message: Message }) {
       className="group flex justify-end gap-3"
     >
       <div className="flex max-w-[85%] flex-col items-end sm:max-w-[75%]">
-        <div className="rounded-2xl rounded-br-md bg-gradient-to-br from-brand-500 to-brand-700 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-white shadow-md shadow-brand-600/20">
+        <div className="user-message rounded-3xl px-5 py-3 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
           {message.content}
         </div>
         <span className="mt-1 text-[11px] text-slate-400 opacity-0 transition group-hover:opacity-100">
@@ -90,7 +91,7 @@ function AssistantBubble({ message }: { message: Message }) {
     >
       <Avatar />
       <div className="min-w-0 flex-1">
-        <div className="inline-block max-w-full rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="inline-block max-w-full px-1 py-2 break-words">
           <Markdown text={message.content} />
         </div>
         <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
@@ -111,14 +112,12 @@ function AssistantBubble({ message }: { message: Message }) {
 
 export function Avatar({ pulse = false }: { pulse?: boolean }) {
   return (
-    <div
+    <AurionLogo
       className={cn(
-        'relative mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-md shadow-brand-500/30',
+        'relative mt-0.5 size-8',
         pulse && 'animate-pulse',
       )}
-    >
-      <Bot className="size-4" />
-    </div>
+    />
   )
 }
 

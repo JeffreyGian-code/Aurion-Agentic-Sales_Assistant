@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_URL } from './api/client'
 import { ChatHeader } from './components/ChatHeader'
 import { Composer } from './components/Composer'
-import { EmptyState } from './components/EmptyState'
 import { MessageList } from './components/MessageList'
 import { Sidebar } from './components/Sidebar'
 import { useChat } from './hooks/useChat'
@@ -31,9 +30,6 @@ export default function App() {
     [send],
   )
 
-  /** Send from a starter card or suggestion chip: keeps whatever the user was typing. */
-  const handleQuickSend = useCallback((text: string) => void send(text), [send])
-
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,7 +49,7 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="flex h-full overflow-hidden">
+      <div className="app-shell flex h-full gap-3 overflow-hidden p-2 sm:p-3">
         <Sidebar
           conversation={active}
           pending={pending}
@@ -61,9 +57,7 @@ export default function App() {
           onClose={() => setSidebarOpen(false)}
         />
 
-        <main className="relative flex min-w-0 flex-1 flex-col">
-          {/* Decorative background glow */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-brand-500/10 to-transparent dark:from-brand-500/[0.07]" />
+        <main className="chat-surface relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border">
 
           <ChatHeader
             conversation={active}
@@ -82,7 +76,7 @@ export default function App() {
 
           {noteOpen && (
             <div className="relative z-30">
-            <aside id="developer-note" aria-labelledby="developer-note-title" className="absolute right-3 top-2 w-[calc(100%-1.5rem)] max-w-sm rounded-2xl border border-brand-200 bg-white p-4 shadow-lg sm:right-5 dark:border-slate-700 dark:bg-slate-900">
+            <aside id="developer-note" aria-labelledby="developer-note-title" className="glass-panel absolute right-3 top-2 w-[calc(100%-1.5rem)] max-w-sm rounded-3xl border p-5 sm:right-5">
               <button type="button" onClick={() => setNoteOpen(false)} aria-label="Close developer note" className="float-right rounded-md p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="size-4" /></button>
               <h2 id="developer-note-title" className="mb-2 text-sm font-semibold">Note from the Dev</h2>
               <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">Hi! Jeffrey here! I’m so happy you’re here. This app uses a free AI model, so replies may take a little longer. Each session gets 7 calls, renewed after 24 hours. I know that’s a small budget, but it helps keep this shared app available for everyone. Thanks for trying it!</p>
@@ -133,12 +127,15 @@ export default function App() {
                 cooldown={chat.cooldown}
                 budgetExhausted={chat.usage.calls >= chat.usage.limit}
                 onRetry={chat.retry}
-                onSuggestion={handleQuickSend}
               />
             ) : (
-              <div className="flex min-h-0 flex-1 overflow-y-auto">
-                <EmptyState onPick={handleQuickSend} />
-              </div>
+              <section aria-labelledby="welcome-title" className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10 text-center">
+                <h2 id="welcome-title" className="text-3xl font-medium leading-snug tracking-tight text-slate-800 sm:text-4xl dark:text-slate-100">
+                  Hello there.
+                  <span className="mt-2 block text-2xl font-normal sm:text-3xl">Aurion, at your service.</span>
+                </h2>
+                <p className="mt-5 text-sm leading-relaxed text-slate-500 sm:text-base dark:text-slate-400">What would you like to drive today?</p>
+              </section>
             )}
           </div>
 

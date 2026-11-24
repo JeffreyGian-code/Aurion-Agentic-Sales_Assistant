@@ -4,13 +4,24 @@
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --color-brand-50: #f0f9ff;
-  --color-brand-100: #e0f2fe;
-  --color-brand-300: #7dd3fc;
-  --color-brand-400: #38bdf8;
-  --color-brand-500: #0ea5e9;
-  --color-brand-600: #0284c7;
-  --color-brand-700: #0369a1;
+  --color-brand-50: #f5f5f5;
+  --color-brand-100: #e5e5e5;
+  --color-brand-300: #c4c4c4;
+  --color-brand-400: #aaaaaa;
+  --color-brand-500: #888888;
+  --color-brand-600: #626262;
+  --color-brand-700: #454545;
+  --color-slate-50: #fafafa;
+  --color-slate-100: #f0f0f0;
+  --color-slate-200: #dedede;
+  --color-slate-300: #cacaca;
+  --color-slate-400: #a3a3a3;
+  --color-slate-500: #777777;
+  --color-slate-600: #595959;
+  --color-slate-700: #3e3e3e;
+  --color-slate-800: #2b2b2b;
+  --color-slate-900: #1d1d1d;
+  --color-slate-950: #111111;
   --animate-blink: blink 1.4s infinite both;
   --animate-float: float 6s ease-in-out infinite;
 
@@ -31,18 +42,116 @@ body,
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  @apply text-slate-800 antialiased dark:text-slate-100;
+  background: #dedede;
   font-family: var(--font-sans);
 }
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background: radial-gradient(ellipse at 15% 0%, rgb(255 255 255 / 0.3), transparent 60%), #dedede;
+}
+
+/* Distant light diffusing outward through the frosted surfaces. */
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 30% 24% at 36% 48%, rgb(239 75 85 / 0.5), rgb(201 51 66 / 0.18) 45%, transparent 80%),
+    radial-gradient(ellipse 26% 32% at 53% 39%, rgb(67 203 135 / 0.42), rgb(36 160 106 / 0.14) 48%, transparent 82%),
+    radial-gradient(ellipse 34% 27% at 65% 56%, rgb(72 126 245 / 0.55), rgb(51 83 211 / 0.18) 48%, transparent 82%);
+  filter: blur(clamp(30px, 5vw, 80px));
+  transform-origin: 50% 48%;
+  animation: mist-spread 24s ease-in-out infinite alternate;
+}
+
+@keyframes mist-spread {
+  from { transform: scale(0.84); opacity: 0.65; }
+  to { transform: scale(1.16); opacity: 1; }
+}
+
+.chat-surface {
+  background: rgb(255 255 255 / 0.52);
+  border-color: rgb(255 255 255 / 0.85);
+  box-shadow: 0 8px 40px rgb(0 0 0 / 0.04);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+.sidebar-surface {
+  background: rgb(205 205 205 / 0.7);
+  border-color: rgb(255 255 255 / 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.app-header {
+  background: rgb(255 255 255 / 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-panel {
+  background: rgb(240 240 240 / 0.9);
+  border-color: rgb(255 255 255 / 0.85);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.12);
+}
+
+.activity-card { background: rgb(255 255 255 / 0.45); }
+.user-message { background: #d8d8d8; color: #292929; }
+.aurion-mark { filter: drop-shadow(0 2px 5px rgb(0 0 0 / 0.2)); }
+.aurion-wordmark { color: #393939; }
+.material-control { color: #595959; transition: background-color 180ms, color 180ms; }
+.material-control:hover { background: rgb(0 0 0 / 0.06); color: #222222; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+button:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 3px;
+}
+
+.dark { color-scheme: dark; }
+.dark body { background: #101010; }
+.dark .app-shell {
+  background: radial-gradient(ellipse at 15% 0%, rgb(120 120 120 / 0.12), transparent 55%),
+    radial-gradient(ellipse at 85% 100%, rgb(80 80 80 / 0.08), transparent 50%), #101010;
+}
+.dark .chat-surface { background: rgb(26 26 26 / 0.66); border-color: rgb(255 255 255 / 0.06); }
+.dark .sidebar-surface { background: rgb(32 32 32 / 0.72); border-color: rgb(255 255 255 / 0.06); }
+.dark .app-header { background: rgb(28 28 28 / 0.3); }
+.dark .glass-panel { background: rgb(38 38 38 / 0.92); border-color: rgb(255 255 255 / 0.1); }
+.dark .activity-card { background: rgb(255 255 255 / 0.035); }
+.dark .user-message { background: #353535; color: #ededed; }
+.dark .aurion-wordmark { color: #e0e0e0; }
+.dark .material-control { color: #b5b5b5; }
+.dark .material-control:hover { background: rgb(255 255 255 / 0.07); color: #f0f0f0; }
 
 ::selection {
   @apply bg-brand-500/30;
 }
 
+.composer-glass {
+  background: linear-gradient(120deg, rgb(255 255 255 / 0.75), rgb(220 220 220 / 0.6));
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.8);
+}
+
+.dark .composer-glass {
+  background: linear-gradient(120deg, rgb(58 58 58 / 0.75), rgb(38 38 38 / 0.65));
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
 /* Thin scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(148 163 184 / 0.4) transparent;
+  scrollbar-color: rgb(150 150 150 / 0.4) transparent;
 }
 
 /* Markdown rendered inside assistant bubbles */
@@ -112,6 +221,12 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-shell::before {
+    animation: none;
+    transform: none;
+    opacity: 0.85;
+  }
+
   *,
   *::before,
   *::after {
