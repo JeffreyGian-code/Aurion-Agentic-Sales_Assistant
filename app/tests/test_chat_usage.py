@@ -95,3 +95,28 @@ def test_failed_turn_and_overlapping_turn_preserve_committed_history():
     _, _, after, *_ = chat_usage.begin(session, "next", False, "second", owner)
     assert before == after == history
     assert chat_usage.owned_usage(session, owner)["calls"] == 2
+
+
+def test_stale_id_recovery_restores_cookie_owner_and_budget():
+    session, lease, *_rest, owner = chat_usage.begin(None, "first", False, "first", None)
+    chat_usage.finish(session, lease, "first", [], "done")
+    with pytest.raises(HTTPException) as expired:
+        chat_usage.begin("stale-session", "next", False, "next", owner)
+    assert expired.value.status_code == 404
+    assert expired.value.headers["X-Error-Code"] == "session-expired"
+    recovered, lease, *_ = chat_usage.begin(None, "next", False, "next", owner)
+    assert recovered == session
+    assert chat_usage.owned_usage(session, owner)["calls"] == 2
+    chat_usage.finish(session, lease, "next", [], "done")
+
+
+def test_lost_cookie_recovery_never_exposes_previous_history():
+    session, lease, *_rest, owner = chat_usage.begin(None, "private", False, "first", None)
+    chat_usage.finish(session, lease, "first", [{"private": "history"}], "done")
+    with pytest.raises(HTTPException):
+        chat_usage.begin(session, "next", False, "next", None)
+    recovered, _, history, _, _, new_owner = chat_usage.begin(None, "next", False, "next", None)
+    assert recovered != session
+    assert new_owner != owner
+    assert history == []
+    assert chat_usage.owned_usage(session, owner)["calls"] == 1

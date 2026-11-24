@@ -15,7 +15,10 @@ function detailToText(detail: ApiError['detail'] | undefined, fallback: string):
 
 function toChatError(status: number, detail: ApiError['detail'] | undefined, code?: string | null, retryAfter?: number): ChatError {
   const text = detailToText(detail, 'Something went wrong while processing your request.')
-  if (code === 'session-expired') return new ChatError('session-expired', text, status)
+  // Older deployments/proxies may omit the machine-readable error header.
+  if (code === 'session-expired' || (status === 404 && text === 'This conversation has expired.')) {
+    return new ChatError('session-expired', text, status)
+  }
   if (code === 'session-limit') return new ChatError('session-limit', text, status, retryAfter)
   if (status === 504) return new ChatError('timeout', text, status)
   if (code === 'conversation-limit') return new ChatError('conversation-limit', text, status)
@@ -67,24 +70,32 @@ export async function sendMessage(
 
   try {
     let res: Response
-    try {
-      res = await fetch(`${API_URL}/chat/stream`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message.trim(), session_id: sessionId ?? null, reset_context: resetContext, request_id: requestId }),
-        signal: controller.signal,
-      })
-    } catch (err) {
-      if (externalSignal?.aborted) throw err
-      if (timedOut) {
-        throw new ChatError('timeout', 'The assistant took too long to respond. Please try again.')
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(`${API_URL}/chat/stream`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: message.trim(), session_id: sessionId ?? null, reset_context: resetContext, request_id: requestId }),
+          signal: controller.signal,
+        })
+      } catch (err) {
+        if (externalSignal?.aborted) throw err
+        if (timedOut) {
+          throw new ChatError('timeout', 'The assistant took too long to respond. Please try again.')
+        }
+        throw new ChatError('network', "Can't reach the server. Check that the API is running.")
       }
-      throw new ChatError('network', "Can't reach the server. Check that the API is running.")
-    }
 
-    if (!res.ok) {
+      if (res.ok) break
       const body: Partial<ApiError> = await res.json().catch(() => ({ detail: res.statusText }))
-      throw toChatError(res.status, body?.detail, res.headers.get("X-Error-Code"), Number(res.headers.get("Retry-After")) || undefined)
+      const error = toChatError(res.status, body?.detail, res.headers.get("X-Error-Code"), Number(res.headers.get("Retry-After")) || undefined)
+      // Ownership was rejected before generation began. Retry once without the
+      // stale ID; the cookie still restores any valid owner's existing budget.
+      if (attempt === 0 && sessionId && error.kind === 'session-expired') {
+        sessionId = null
+        continue
+      }
+      throw error
     }
 
     if (!res.body) throw new ChatError('server', 'The server did not return a response stream.')
@@ -161,7 +172,10 @@ export function validUsage(value: unknown): value is ChatUsage {
 
 export async function getChatUsage(sessionId: string): Promise<ChatUsage> {
   const res = await fetch(`${API_URL}/chat/usage/${encodeURIComponent(sessionId)}`, { credentials: "include", signal: AbortSignal.timeout(12_000) })
-  if (!res.ok) throw toChatError(res.status, 'Could not check usage', res.headers.get('X-Error-Code'))
+  if (!res.ok) {
+    const body: Partial<ApiError> = await res.json().catch(() => ({}))
+    throw toChatError(res.status, body.detail ?? 'Could not check usage', res.headers.get('X-Error-Code'))
+  }
   const value = await res.json()
   if (!validUsage(value)) throw new Error("Invalid usage response")
   return value
