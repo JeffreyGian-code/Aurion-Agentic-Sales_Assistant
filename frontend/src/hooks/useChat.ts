@@ -68,6 +68,12 @@ export function useChat() {
     const id = readStorage<unknown>(SESSION_KEY, null)
     return typeof id === 'string' && (USE_MOCK || /^[a-zA-Z0-9_-]{43}$/.test(id)) ? id : null
   })
+  const sessionRef = useRef(sessionId)
+  const saveSession = useCallback((id: string | null) => {
+    sessionRef.current = id
+    setSessionId(id)
+    writeStorage(SESSION_KEY, id)
+  }, [])
   const [usage, setUsage] = useState<ChatUsage>(() => {
     const saved = readStorage(USAGE_KEY, null)
     return validUsage(saved) && (sessionId || USE_MOCK) ? saved : { calls: 0, limit: 7, resets_at: null }
@@ -89,15 +95,15 @@ export function useChat() {
     }
     if (!sessionId) return
     try {
-      setUsage(await getChatUsage(sessionId))
+      const currentUsage = await getChatUsage(sessionId)
+      if (sessionRef.current === sessionId) setUsage(currentUsage)
     } catch (error) {
-      if (error instanceof ChatError && error.kind === 'session-expired') {
-        setSessionId(null)
-        writeStorage(SESSION_KEY, null)
+      if (sessionRef.current === sessionId && error instanceof ChatError && error.kind === 'session-expired') {
+        saveSession(null)
         setUsage({ calls: 0, limit: 7, resets_at: null })
       }
     }
-  }, [sessionId])
+  }, [sessionId, saveSession])
 
   useEffect(() => {
     const initial = setTimeout(() => void refreshUsage(), 0)
@@ -165,13 +171,14 @@ export function useChat() {
             return { ...current, activeTools, status: tools.length ? tools.join(' · ') : progress.label }
           })
         }, (id) => {
-          setSessionId(id)
-          writeStorage(SESSION_KEY, id)
+          saveSession(id)
           if (USE_MOCK && !previousRequestId) setUsage((current) => {
             const expired = current.resets_at !== null && current.resets_at * 1000 <= Date.now()
             return { ...current, calls: (expired ? 0 : current.calls) + 1, resets_at: expired || !current.resets_at ? Date.now() / 1000 + 86400 : current.resets_at }
           })
-          if (!USE_MOCK) void getChatUsage(id).then(setUsage).catch(() => {})
+          if (!USE_MOCK) void getChatUsage(id).then((currentUsage) => {
+            if (sessionRef.current === id) setUsage(currentUsage)
+          }).catch(() => {})
           if (!controller.signal.aborted) update(convId, (c) => ({ ...c, sessionId: id }))
         }, (delta) => {
           if (controller.signal.aborted) return
@@ -210,7 +217,10 @@ export function useChat() {
           const resetsAt = Date.now() / 1000 + e.retryAfter
           setUsage(current => ({ ...current, calls: current.limit, resets_at: resetsAt }))
         }
-        if (e.kind === 'session-expired') { setSessionId(null); writeStorage(SESSION_KEY, null) }
+        if (e.kind === 'session-expired') {
+          saveSession(null)
+          setUsage({ calls: 0, limit: 7, resets_at: null })
+        }
         update(convId, (c) => ({
           ...c,
           ended: false,
@@ -226,7 +236,7 @@ export function useChat() {
         void refreshUsage()
       }
     },
-    [active, cooldown, update, sessionId, usage, refreshUsage],
+    [active, cooldown, update, sessionId, usage, refreshUsage, saveSession],
   )
 
   /** Remove a failed exchange (user message + error) and send it again. */

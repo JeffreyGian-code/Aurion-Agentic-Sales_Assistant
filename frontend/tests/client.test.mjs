@@ -14,7 +14,7 @@ const client = compile('../src/api/client.ts')
   .replaceAll("'./types'", JSON.stringify(types))
   .replaceAll("'./mock'", JSON.stringify(mock))
   .replaceAll('import.meta.env', '({})')
-const { sendMessage } = await import(asModule(client))
+const { sendMessage, getChatUsage } = await import(asModule(client))
 const frame = (event, payload) => `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
 
 test('reset keeps the session identity and requests fresh context', async (t) => {
@@ -122,4 +122,49 @@ test('classifies server quota codes and rejects malformed completion data', asyn
   await assert.rejects(sendMessage('Hi'), e => e.kind === 'session-limit' && e.retryAfter === 7200)
   fetch.mock.mockImplementation(async () => stream(frame('completed', { reply: {} })))
   await assert.rejects(sendMessage('Hi'), e => e.kind === 'server')
+})
+
+for (const withHeader of [true, false]) {
+  test(`recovers a stale session once (error header: ${withHeader})`, async (t) => {
+    const requests = []
+    const sessions = []
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      assert.equal(options.credentials, 'include')
+      requests.push(JSON.parse(options.body))
+      return requests.length === 1
+        ? new Response(JSON.stringify({ detail: 'This conversation has expired.' }), {
+          status: 404, headers: withHeader ? { 'X-Error-Code': 'session-expired' } : {},
+        })
+        : stream(frame('started', { session_id: 'recovered' }) +
+          frame('completed', { session_id: 'recovered', reply: 'Hello' }))
+    })
+    const result = await sendMessage('Hello', 'stale', undefined, undefined, id => sessions.push(id), undefined, true, 'turn-1')
+    assert.equal(result.reply, 'Hello')
+    assert.deepEqual(sessions, ['recovered'])
+    assert.deepEqual(requests, [
+      { message: 'Hello', session_id: 'stale', reset_context: true, request_id: 'turn-1' },
+      { message: 'Hello', session_id: null, reset_context: true, request_id: 'turn-1' },
+    ])
+  })
+}
+
+test('stops recovery after one retry and classifies headerless usage expiry', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(
+    JSON.stringify({ detail: 'This conversation has expired.' }), { status: 404 },
+  ))
+  await assert.rejects(sendMessage('Hello', 'stale'), e => e.kind === 'session-expired')
+  assert.equal(fetch.mock.callCount(), 2)
+  await assert.rejects(getChatUsage('stale'), e => e.kind === 'session-expired')
+})
+
+test('does not retry unrelated 404s or errors after generation starts', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(
+    JSON.stringify({ detail: 'Not Found' }), { status: 404 },
+  ))
+  await assert.rejects(sendMessage('Hello', 'current'), e => e.kind === 'server')
+  assert.equal(fetch.mock.callCount(), 1)
+  fetch.mock.mockImplementation(async () => stream(frame('started', { session_id: 'current' }) +
+    frame('error', { status: 404, code: 'session-expired', detail: 'This conversation has expired.' })))
+  await assert.rejects(sendMessage('Hello', 'current'), e => e.kind === 'session-expired')
+  assert.equal(fetch.mock.callCount(), 2)
 })
