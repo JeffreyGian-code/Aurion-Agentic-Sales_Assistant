@@ -124,9 +124,22 @@ be numbers without currency symbols, commas, or words.
 Use this tool for EMI calculations instead of estimating the repayment from
 memory. It accepts:
 
-- `principal`: the amount actually borrowed, in rupees.
-- `annual_rate`: annual interest rate as a percentage, so 9% is `9`, not `0.09`.
-- `months`: repayment duration as a whole number of months; 5 years is `60`.
+- `principal`: finite amount actually borrowed, from Rs 0.01 to Rs 1 billion.
+- `annual_rate`: finite annual interest percentage from 0 to 100 inclusive;
+  9% is `9`, not `0.09`.
+- `months`: whole number from 1 to 600 inclusive; 5 years is `60`.
+
+These bounds define the supported estimate range. Strings and booleans are not
+numeric inputs. The tool and service both validate the request. Invalid tool
+inputs return an explicit "Invalid EMI request" error; ask for corrected inputs.
+The service returns a typed `EMIResult` or raises `EMIValidationError` for invalid
+inputs; the tool serializes successful results as an object with the fields below.
+
+Each output is rounded independently to the nearest paise (two decimal places),
+with exact halves rounded up. Total repayment and interest are computed from the
+unrounded EMI, so multiplying the displayed EMI by the duration may differ from
+the displayed total. This estimate does not model a lender's final-payment
+adjustment.
 
 Example: "EMI for an 8 lakh loan at 8.5% for 5 years" becomes:
 

@@ -1,5 +1,6 @@
 from langchain_core.tools import StructuredTool
 
+from app.models.emi import EMIRequest
 from app.models.SearchRequest import SearchRequest
 from app.models.vehicle import Vehicle
 from app.repositories.postgres_vehicle_repository import (
@@ -53,14 +54,14 @@ class AgentTools:
         principal: float,
         annual_rate: float,
         months: int,
-    ):
+    ) -> dict[str, float]:
         """Calculate monthly EMI and total loan cost."""
 
         return self.finance_service.calculate_emi(
             principal=principal,
             annual_rate=annual_rate,
             months=months,
-        )
+        ).model_dump()
 
     def get_tools(self):
         return [
@@ -86,6 +87,8 @@ class AgentTools:
             StructuredTool.from_function(
                 func=self.calculate_emi,
                 name="calculate_emi",
+                args_schema=EMIRequest,
+                handle_validation_error=lambda exc: f"Invalid EMI request: {exc}",
                 description=(
                     "Calculate monthly EMI and total "
                     "loan cost."
