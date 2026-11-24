@@ -62,3 +62,11 @@ Frontend checks were outside this backend pytest run.
 | `repository-failure` | Fail. The injected `ConnectionError` escaped the tool path before the assistant could explain the failure to the customer. | 1 |
 
 An initial attempt at 16:42:09 IST hit a Windows permission error in pytest's default temporary directory. It stopped during setup with 14 errors and sent zero model requests. The baseline above comes from the retry with a fresh temporary directory.
+
+### OpenRouter activity for the same run
+
+The 28 dashboard rows supplied for this run show **93,844 input tokens**, **8,656 output tokens**, and **102,500 total tokens**, with **$0.00 displayed cost**. Input accounted for **91.6%** of usage. The dashboard total exceeds the original JUnit subtotal by **3,272 tokens**, exactly matching the last recorded tool-call request (3,153 input and 119 output). That is consistent with the missing usage from the interrupted repository-failure turn.
+
+Across those 28 requests, OpenRouter's **time to first token** was **0.35 s at p50** and **0.98 s at p95** (nearest rank), with a range of **0.32–1.21 s**. This is a per-request provider metric. A tool-call token can arrive before any text is visible, and a single conversation turn can contain multiple requests. The original run did not measure time to first visible text.
+
+NVIDIA reported **2,112 cached prompt tokens on each of the 28 requests**, according to the OpenRouter dashboard. All 28 requests had a prompt cache hit. Across the run, **59,136 of 93,844 input tokens (63.0%)** were served from cache, leaving **34,708 input tokens** outside the cache. The cached tokens are included in the input total. This run provides a latency baseline with a cache hit on every request.

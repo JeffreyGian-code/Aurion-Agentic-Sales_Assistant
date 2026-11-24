@@ -1,6 +1,7 @@
 """Opt-in real-model evals plus an offline check of the evaluation harness."""
 
 from decimal import Decimal
+import json
 import os
 import re
 from time import perf_counter, sleep
@@ -8,7 +9,8 @@ from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGenerationChunk
 from langgraph.checkpoint.memory import InMemorySaver
 from langsmith import tracing_context
 import pytest
@@ -175,35 +177,68 @@ def grade_turn(messages, expected):
         assert not re.search(pattern, normalized, re.IGNORECASE | re.DOTALL), f"Unexpected evidence: {pattern}"
 
 
+def visible_text(content):
+    if isinstance(content, str):
+        return content
+    return "".join(
+        part.get("text", "") for part in (content or [])
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+def record_usage(properties, prefix, model_messages):
+    # Use the final message for each model call. Streaming deltas can carry
+    # usage too, so counting both would inflate totals.
+    for metric in ("input_tokens", "output_tokens", "total_tokens"):
+        counts = []
+        for call_number, message in enumerate(model_messages, start=1):
+            value = (message.usage_metadata or {}).get(metric)
+            counts.append(value)
+            properties.append((f"{prefix}_model_{call_number}_{metric}",
+                               value if value is not None else "unavailable"))
+        suffix = "tokens" if metric == "total_tokens" else metric
+        total = sum(counts) if counts and all(count is not None for count in counts) else "unavailable"
+        properties.append((f"{prefix}_{suffix}", total))
+
+
 def run_case(agent, turns, properties):
     session_ids = {}
     for number, turn in enumerate(turns, start=1):
         thread_id = session_ids.setdefault(turn.session, uuid4().hex)
+        prefix = f"turn_{number}"
+        messages = []
+        first_text_seconds = None
         start = perf_counter()
         try:
             with tracing_context(enabled=False):
-                state = agent.invoke(
+                for mode, event in agent.stream(
                     {"messages": [HumanMessage(content=turn.prompt)]},
                     config={"configurable": {"thread_id": thread_id}},
-                )
+                    stream_mode=["messages", "values"],
+                ):
+                    if mode == "values":
+                        history = event["messages"]
+                        last_user = max(
+                            index for index, message in enumerate(history) if isinstance(message, HumanMessage)
+                        )
+                        messages = history[last_user + 1:]
+                    elif first_text_seconds is None:
+                        chunk, _ = event
+                        if isinstance(chunk, AIMessageChunk) and visible_text(chunk.content):
+                            first_text_seconds = round(perf_counter() - start, 3)
         except Exception as exc:
             # Suppress exception details, which may contain connection info.
             raise pytest.fail.Exception(
                 f"Turn {number}: agent raised {type(exc).__name__} before replying", pytrace=False
             ) from None
         finally:
-            properties.append((f"turn_{number}_seconds", round(perf_counter() - start, 3)))
-
-        history = state["messages"]
-        last_user = max(index for index, message in enumerate(history) if isinstance(message, HumanMessage))
-        messages = history[last_user + 1:]
-        model_messages = [message for message in messages if isinstance(message, AIMessage)]
-        properties.append((f"turn_{number}_model_messages", len(model_messages)))
-        properties.append((f"turn_{number}_tool_calls", sum(len(message.tool_calls) for message in model_messages)))
-        if model_messages and all(message.usage_metadata for message in model_messages):
-            properties.append((f"turn_{number}_tokens", sum(
-                message.usage_metadata["total_tokens"] for message in model_messages
-            )))
+            properties.append((f"{prefix}_seconds", round(perf_counter() - start, 3)))
+            properties.append((f"{prefix}_first_text_seconds",
+                               first_text_seconds if first_text_seconds is not None else "unavailable"))
+            model_messages = [message for message in messages if isinstance(message, AIMessage)]
+            properties.append((f"{prefix}_model_messages", len(model_messages)))
+            properties.append((f"{prefix}_tool_calls", sum(len(message.tool_calls) for message in model_messages)))
+            record_usage(properties, prefix, model_messages)
         print(f"Turn {number} [{turn.session}]: {turn.prompt}")
         for message in model_messages:
             if message.tool_calls:
@@ -258,22 +293,68 @@ def test_eval_harness_checks_tools_and_reply(catalogue):
         def bind_tools(self, tools, **kwargs):
             return self
 
+        def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+            message = self._generate(messages, stop=stop, **kwargs).generations[0].message
+            yield ChatGenerationChunk(message=AIMessageChunk(
+                content=[{"type": "reasoning", "reasoning": "Hidden reasoning."}],
+            ))
+            if message.tool_calls:
+                call = message.tool_calls[0]
+                yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[{
+                    "name": call["name"], "args": json.dumps(call["args"]), "id": call["id"], "index": 0,
+                }]))
+            else:
+                yield ChatGenerationChunk(message=AIMessageChunk(content=message.content[:5]))
+                yield ChatGenerationChunk(message=AIMessageChunk(content=message.content[5:]))
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", usage_metadata=message.usage_metadata))
+
     call = AIMessage(content="", tool_calls=[{
         "name": "search_vehicles",
         "args": {"request": {"brand": "honda", "vehicle_type": "sedan", "max_price": 999999}},
         "id": "fixture-call",
-    }])
+    }], usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120})
     for reply, should_pass in [
         ("Amaze S (ID 3): ₹8 lakh. City VX (ID 1): ₹9,50,000. Indicative prices.", True),
         ("Amaze S (ID 3): ₹8 lakh. City ZX (ID 2): ₹9,50,000.", False),
     ]:
         graph = create_agent(
-            ScriptedModel(responses=[call, AIMessage(content=reply)]),
+            ScriptedModel(responses=[call, AIMessage(content=reply, usage_metadata={
+                "input_tokens": 160, "output_tokens": 40, "total_tokens": 200,
+            })]),
             tools=AgentTools().get_tools(),
             checkpointer=InMemorySaver(),
         )
         if should_pass:
-            run_case(graph, evaluation_cases["strict-budget"], [])
+            properties = []
+            run_case(graph, evaluation_cases["strict-budget"], properties)
+            metrics = dict(properties)
+            assert 0 <= metrics["turn_1_first_text_seconds"] <= metrics["turn_1_seconds"]
+            assert metrics["turn_1_input_tokens"] == 260
+            assert metrics["turn_1_output_tokens"] == 60
+            assert metrics["turn_1_tokens"] == 320
+            assert metrics["turn_1_model_1_input_tokens"] == 100
+            assert metrics["turn_1_model_2_output_tokens"] == 40
         else:
             with pytest.raises(AssertionError, match="Unexpected evidence"):
                 run_case(graph, evaluation_cases["strict-budget"], [])
+
+
+def test_eval_metrics_when_no_text_or_usage_is_available():
+    class InterruptedAgent:
+        def stream(self, *_args, **_kwargs):
+            yield "messages", (AIMessageChunk(content=[{
+                "type": "reasoning", "reasoning": "Hidden reasoning.",
+            }]), {})
+            yield "messages", (AIMessageChunk(content="", tool_call_chunks=[{
+                "name": "search_vehicles", "args": "{}", "index": 0,
+            }]), {})
+            yield "values", {"messages": [HumanMessage(content="Find cars"), AIMessage(content="")]}
+            raise ConnectionError
+
+    properties = []
+    with pytest.raises(pytest.fail.Exception, match="ConnectionError"):
+        run_case(InterruptedAgent(), evaluation_cases["strict-budget"], properties)
+    metrics = dict(properties)
+    assert metrics["turn_1_first_text_seconds"] == "unavailable"
+    assert metrics["turn_1_model_1_input_tokens"] == "unavailable"
+    assert metrics["turn_1_input_tokens"] == metrics["turn_1_output_tokens"] == "unavailable"
