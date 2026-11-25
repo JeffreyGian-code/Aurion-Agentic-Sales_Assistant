@@ -51,6 +51,35 @@ def test_budget_blocks_reset_until_24_hours(monkeypatch):
     assert chat_usage.session_usage('user', consume=True)['calls'] == 1
 
 
+def test_dev_chat_can_continue_after_seven_calls(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "dev")
+    limiter.reset()
+    agent = FakeAgent()
+    app.dependency_overrides[get_agent] = lambda: agent
+    try:
+        with TestClient(app) as client:
+            first = client.post("/api/chat", json={"message": "Find cars"})
+            session = first.json()["session_id"]
+            for _ in range(6):
+                assert client.post("/api/chat", json={
+                    "message": "Continue", "session_id": session,
+                }).status_code == 200
+
+            stream_agent = StreamAgent()
+            app.dependency_overrides[get_agent] = lambda: stream_agent
+            response = client.post("/api/chat/stream", json={
+                "message": "Start fresh", "session_id": session, "reset_context": True,
+            })
+            assert frames(response)[-1][0] == "completed"
+            assert stream_agent.calls[0][1]["configurable"]["thread_id"] != session
+            assert client.get(f"/api/chat/usage/{session}").json() == {
+                "calls": 0, "limit": None, "resets_at": None,
+            }
+    finally:
+        app.dependency_overrides.clear()
+        limiter.reset()
+
+
 def test_concurrent_requests_cannot_overspend():
     def call(_):
         try:

@@ -12,9 +12,9 @@ cd /home/ubuntu/Aurion-Agentic-Sales_Assistant
 # Skip this command if you already pulled the latest changes.
 git pull --ff-only
 
-# Update backend dependencies and ensure PostgreSQL is healthy.
+# Update backend dependencies and start PostgreSQL and Chroma.
 .venv/bin/python -m pip install -r requirements.txt
-docker compose up -d --wait postgres
+docker compose up -d --wait
 
 # Install frontend dependencies and create the production build.
 cd frontend
@@ -46,7 +46,7 @@ also checks PostgreSQL and OpenRouter.
 | Frontend source or dependencies | In `frontend`, run `npm ci`, then `npm run build`, then `pm2 restart vehicle-frontend`. |
 | Frontend `VITE_*` environment values | Rebuild and restart the frontend; these values are embedded at build time. |
 | Backend source or dependencies | Install `requirements.txt` if dependencies changed, then `sudo systemctl restart vehicle-assistant`. |
-| Root `.env` | Restart `vehicle-assistant`. If Compose settings changed, also run `docker compose up -d --wait postgres`. |
+| Root `.env` | Restart `vehicle-assistant`. If Compose settings changed, also run `docker compose up -d --wait`. |
 | systemd service file | Run `sudo systemctl daemon-reload`, then restart `vehicle-assistant`. |
 | Nginx config | Run `sudo nginx -t && sudo systemctl reload nginx`. |
 | Database schema or seed files | Existing volumes are not initialized again. Back up the database and apply the specific SQL change deliberately. |

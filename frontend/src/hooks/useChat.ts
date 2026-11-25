@@ -8,6 +8,8 @@ const STORAGE_KEY = 'vsa.conversation'
 const ACTIVE_KEY = 'vsa.activeId'
 const SESSION_KEY = 'vsa.serverSession'
 const USAGE_KEY = 'vsa.usage'
+const DEFAULT_CALL_LIMIT = 7
+const EMPTY_USAGE: ChatUsage = { calls: 0, limit: USE_MOCK ? DEFAULT_CALL_LIMIT : null, resets_at: null }
 /** Fallback when a gateway omits the retry interval. */
 export const IP_COOLDOWN_SECONDS = 60
 export interface PendingRequest {
@@ -75,8 +77,8 @@ export function useChat() {
     writeStorage(SESSION_KEY, id)
   }, [])
   const [usage, setUsage] = useState<ChatUsage>(() => {
-    const saved = readStorage(USAGE_KEY, null)
-    return validUsage(saved) && (sessionId || USE_MOCK) ? saved : { calls: 0, limit: 7, resets_at: null }
+    const saved = readStorage<unknown>(USAGE_KEY, null)
+    return validUsage(saved) && (USE_MOCK ? saved.limit !== null : sessionId) ? saved : EMPTY_USAGE
   })
   useEffect(() => {
     if (!usage.resets_at) return
@@ -90,7 +92,7 @@ export function useChat() {
   const refreshUsage = useCallback(async () => {
     if (USE_MOCK) {
       setUsage((current) => current.resets_at && current.resets_at * 1000 <= Date.now()
-        ? { calls: 0, limit: 7, resets_at: null } : current)
+        ? EMPTY_USAGE : current)
       return
     }
     if (!sessionId) return
@@ -100,7 +102,7 @@ export function useChat() {
     } catch (error) {
       if (sessionRef.current === sessionId && error instanceof ChatError && error.kind === 'session-expired') {
         saveSession(null)
-        setUsage({ calls: 0, limit: 7, resets_at: null })
+        setUsage(EMPTY_USAGE)
       }
     }
   }, [sessionId, saveSession])
@@ -126,6 +128,7 @@ export function useChat() {
   }, [cooldown])
 
   const active = conversations.find((c) => c.id === activeId) ?? null
+  const budgetExhausted = usage.limit !== null && usage.calls >= usage.limit
 
   const update = useCallback((id: string, fn: (c: Conversation) => Conversation) => {
     setConversations((prev) => prev.map((c) => (c.id === id ? fn(c) : c)))
@@ -136,7 +139,8 @@ export function useChat() {
     async (rawText: string, previousRequestId?: string) => {
       const requestId = previousRequestId ?? uid()
       const text = rawText.trim()
-      if (!text || abortRef.current || cooldown > 0 || (!previousRequestId && usage.calls >= usage.limit && (!usage.resets_at || usage.resets_at * 1000 > Date.now()))) return
+      if (!text || abortRef.current || cooldown > 0) return
+      if (!previousRequestId && budgetExhausted && (!usage.resets_at || usage.resets_at * 1000 > Date.now())) return
 
       const conv = active ?? newConversation(text)
       if (!active) setConversations([conv])
@@ -215,11 +219,14 @@ export function useChat() {
         if (e.kind === 'ip-rate-limit') setCooldown(e.retryAfter ?? IP_COOLDOWN_SECONDS)
         if (e.kind === 'session-limit' && e.retryAfter) {
           const resetsAt = Date.now() / 1000 + e.retryAfter
-          setUsage(current => ({ ...current, calls: current.limit, resets_at: resetsAt }))
+          setUsage(current => {
+            const limit = current.limit ?? DEFAULT_CALL_LIMIT
+            return { calls: limit, limit, resets_at: resetsAt }
+          })
         }
         if (e.kind === 'session-expired') {
           saveSession(null)
-          setUsage({ calls: 0, limit: 7, resets_at: null })
+          setUsage(EMPTY_USAGE)
         }
         update(convId, (c) => ({
           ...c,
@@ -236,7 +243,7 @@ export function useChat() {
         void refreshUsage()
       }
     },
-    [active, cooldown, update, sessionId, usage, refreshUsage, saveSession],
+    [active, budgetExhausted, cooldown, update, sessionId, usage.resets_at, refreshUsage, saveSession],
   )
 
   /** Remove a failed exchange (user message + error) and send it again. */
@@ -261,5 +268,5 @@ export function useChat() {
     setConversations([{ ...newConversation(''), sessionId, resetContext: true }])
   }, [sessionId])
 
-  return { active, pending, cooldown, send, retry, stop, reset, usage }
+  return { active, pending, cooldown, send, retry, stop, reset, usage, budgetExhausted }
 }

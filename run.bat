@@ -74,9 +74,9 @@ rem ---- Frontend dependencies -------------------------------------------------
 call :frontend_deps || goto :fail
 
 rem ---- Database ----------------------------------------------------------------
-echo [3/5] Starting PostgreSQL (Docker)...
+echo [3/5] Starting PostgreSQL and Chroma (Docker)...
 docker compose up -d --wait || (
-    echo [X] The database container failed to start. Check: docker compose logs postgres
+    echo [X] A database container failed to start. Check: docker compose logs postgres chroma
     goto :fail
 )
 
@@ -129,7 +129,7 @@ rem Fallback: free the ports in case the windows were renamed.
 call :kill_port 5173
 call :kill_port 8000
 where docker >nul 2>&1 && docker info >nul 2>&1 && (
-    echo Stopping database container...
+    echo Stopping database containers...
     docker compose stop
 )
 echo Done.

@@ -35,13 +35,14 @@ def initialize(db):
 
 
 def budget(db, session_id, consume, reset_context):
+    limit = None if os.getenv("APP_ENV", "prod").strip().lower() == "dev" else CALL_LIMIT
     now = time.time()
     row = db.execute("SELECT calls, resets_at, thread_id FROM chat_usage WHERE session_id = ?", (session_id,)).fetchone()
     calls, resets_at, thread_id = row or (0, now + WINDOW_SECONDS, session_id)
     if resets_at <= now:
         calls, resets_at = 0, now + WINDOW_SECONDS
     if consume:
-        if calls >= CALL_LIMIT:
+        if limit is not None and calls >= limit:
             raise HTTPException(
                 status_code=429,
                 headers={"X-Error-Code": "session-limit", "Retry-After": str(max(1, math.ceil(resets_at-now)))},
@@ -49,9 +50,16 @@ def budget(db, session_id, consume, reset_context):
             )
         if reset_context:
             thread_id = str(uuid.uuid4())
-        calls += 1
-        db.execute("INSERT OR REPLACE INTO chat_usage VALUES (?, ?, ?, ?)", (session_id, calls, resets_at, thread_id))
-    return {"calls": calls, "limit": CALL_LIMIT, "resets_at": resets_at if calls else None, "thread_id": thread_id}
+        if limit is not None:
+            calls += 1
+        if limit is not None or reset_context:
+            db.execute("INSERT OR REPLACE INTO chat_usage VALUES (?, ?, ?, ?)", (session_id, calls, resets_at, thread_id))
+    return {
+        "calls": calls if limit is not None else 0,
+        "limit": limit,
+        "resets_at": resets_at if limit is not None and calls else None,
+        "thread_id": thread_id,
+    }
 
 def session_usage(session_id, *, consume=False, reset_context=False):
     with closing(connect()) as db, db:

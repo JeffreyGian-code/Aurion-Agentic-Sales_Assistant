@@ -86,7 +86,11 @@ export default function App() {
             <aside id="developer-note" aria-labelledby="developer-note-title" className="glass-panel absolute right-3 top-2 w-[calc(100%-1.5rem)] max-w-sm rounded-3xl border p-5 sm:right-5">
               <button type="button" onClick={() => setNoteOpen(false)} aria-label="Close developer note" className="float-right rounded-md p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="size-4" /></button>
               <h2 id="developer-note-title" className="mb-2 text-sm font-semibold">Note from the Dev</h2>
-              <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">Hi! Jeffrey here! I’m so happy you’re here. This app uses a free AI model, so replies may take a little longer. Each session gets 7 calls, renewed after 24 hours. I know that’s a small budget, but it helps keep this shared app available for everyone. Thanks for trying it!</p>
+              <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                Hi! Jeffrey here! I’m so happy you’re here. This app uses a free AI model, so replies may take a little longer.
+                {chat.usage.limit !== null && ` Each session gets ${chat.usage.limit} calls, renewed after 24 hours to keep the shared app available for everyone.`}
+                {' Thanks for trying it!'}
+              </p>
             </aside>
             </div>
           )}
@@ -132,7 +136,7 @@ export default function App() {
                 conversation={active}
                 pending={pending}
                 cooldown={chat.cooldown}
-                budgetExhausted={chat.usage.calls >= chat.usage.limit}
+                budgetExhausted={chat.budgetExhausted}
                 onRetry={chat.retry}
               />
             ) : (
@@ -154,7 +158,7 @@ export default function App() {
             onStop={stop}
             pending={!!pending}
             cooldown={chat.cooldown}
-            budgetExhausted={chat.usage.calls >= chat.usage.limit}
+            budgetExhausted={chat.budgetExhausted}
             budgetResetsAt={chat.usage.resets_at}
             inputRef={inputRef}
           />

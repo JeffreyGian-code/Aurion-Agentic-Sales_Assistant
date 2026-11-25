@@ -113,6 +113,7 @@ async def chat(request: Request, body: ChatRequest, agent: Annotated[Any, Depend
 
 TOOL_LABELS = {
     "search_vehicles": "Searching vehicle inventory…",
+    "recommend_vehicles": "Comparing vehicle recommendations…",
     "get_vehicle_details": "Fetching vehicle details…",
     "calculate_emi": "Calculating EMI…",
 }
@@ -127,6 +128,7 @@ TRACE_FIELDS = {
     "request", "vehicles", "brand", "model", "variant", "vehicle_type", "min_price",
     "max_price", "sort_order", "vehicle_id", "id", "price", "principal", "annual_rate",
     "months", "monthly_emi", "total_payment", "total_interest",
+    "filters", "priorities", "topic", "required", "recommendations", "vehicle", "match",
 }
 
 
@@ -140,7 +142,7 @@ def _trace_value(value, *, field=None):
     if isinstance(value, (list, tuple)):
         return [_trace_value(item) for item in value[:10]]
     if isinstance(value, str):
-        if field in {"brand", "model", "variant", "vehicle_type", "sort_order"}:
+        if field in {"brand", "model", "variant", "vehicle_type", "sort_order", "topic", "match"}:
             return value[:120]
         try:
             parsed = json.loads(value)

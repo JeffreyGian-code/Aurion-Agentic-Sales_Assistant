@@ -17,7 +17,7 @@ interface Props {
   noteOpen: boolean
   pending: boolean
   calls: number
-  callLimit: number
+  callLimit: number | null
 }
 
 export function ChatHeader({ conversation, health, onRefreshHealth, theme, onCycleTheme, onOpenSidebar, onReset, onToggleNote, noteOpen, pending, calls, callLimit }: Props) {
@@ -35,7 +35,9 @@ export function ChatHeader({ conversation, health, onRefreshHealth, theme, onCyc
 
       <div className="min-w-28 flex-1">
         <h1 className="aurion-wordmark truncate text-xl font-medium tracking-tight sm:text-2xl" title={conversation?.title}>Aurion</h1>
-        <p className="text-[11px] text-slate-500" aria-live="polite">{calls}/{callLimit} calls used · Renews every 24 hours</p>
+        {callLimit !== null && (
+          <p className="text-[11px] text-slate-500" aria-live="polite">{calls}/{callLimit} calls used · Renews every 24 hours</p>
+        )}
       </div>
 
       <button type="button" onClick={onReset} disabled={pending} title="Clear conversation context. Your call count and limits stay the same."

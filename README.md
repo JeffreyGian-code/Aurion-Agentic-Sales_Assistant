@@ -1,8 +1,8 @@
 # Vehicle Sales Assistant (LangChain + PostgreSQL)
 
 A command-line AI assistant that helps Indian customers find vehicles, look up
-details, and calculate EMIs. Vehicle data lives in PostgreSQL, which runs in
-Docker. No local PostgreSQL install is needed.
+details, and calculate EMIs. PostgreSQL supplies catalogue records and prices.
+Chroma serves recommendation evidence indexed from Markdown. Both run in Docker.
 
 ```text
 User -> LangChain agent -> SearchRequest -> search_vehicles tool
@@ -57,13 +57,32 @@ DATABASE_URL=postgresql+psycopg://vehicle_app:<same-password>@localhost:5432/veh
 ```
 
 `.env` is ignored by Git; `.env.example` is intentionally safe to commit.
+Set `APP_ENV=dev` for local testing without the daily session cap. Production
+uses `APP_ENV=prod` and allows seven chat requests per session every 24 hours.
 Rotate any API keys that have previously appeared in a terminal, chat,
 screenshot, or commit.
 
-## 3. Start PostgreSQL
+## 3. Start PostgreSQL and Chroma
 
 ```powershell
-docker compose up -d
+docker pull chromadb/chroma:1.5.10.dev326
+docker compose up -d --wait
+```
+
+`docker-compose.yml` runs Chroma at `http://127.0.0.1:8001` with a persistent
+`aurion_chroma_data` volume. Set `CHROMA_PORT` in `.env` to change the host port,
+or `CHROMA_URL` to point the backend at another Chroma server.
+
+The first recommendation after starting the backend indexes the current
+`data/vehicle_knowledge.md` in Chroma. Restart the backend after editing the
+Markdown so it can index the new revision. Recommendations use Chroma for
+evidence lookup and PostgreSQL for exact variant records and prices. SQL-only
+search still works if Chroma is unavailable.
+
+Check Chroma on the default port:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/api/v2/heartbeat
 ```
 
 `docker-compose.yml` starts PostgreSQL 18 as `vehicle-pg`, using the
@@ -103,6 +122,7 @@ python main.py
 Try:
 
 - `Find Honda sedans under 10 lakh`
+- `Suggest a city commuter under 8 lakh`
 - `Show me Toyota vehicles`
 - `What is the EMI on 12 lakh at 9% for 5 years?`
 

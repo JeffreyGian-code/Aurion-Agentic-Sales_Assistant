@@ -81,6 +81,7 @@ nano .env
 Set these values in `.env`:
 
 ```dotenv
+APP_ENV=prod
 OPENROUTER_API_KEY=your_real_openrouter_key
 LANGSMITH_TRACING=false
 POSTGRES_USER=vehicle_app
@@ -108,19 +109,24 @@ chat. If a database password was exposed, rotate it in PostgreSQL with the
 interactive `\password vehicle_app` command described below, then update
 both password values in `.env`.
 
-## 4. Start PostgreSQL and install the Python app
+## 4. Start PostgreSQL and Chroma and install the Python app
 
 ```bash
 cd /home/ubuntu/Aurion-Agentic-Sales_Assistant
-docker compose up -d --wait postgres
+docker compose up -d --wait
 docker compose ps
 docker compose exec postgres psql -U vehicle_app -d vehicle_agent -c 'SELECT COUNT(*) FROM vehicles;'
+curl -fsS http://127.0.0.1:8001/api/v2/heartbeat
 ```
 
 On a fresh data volume, the repository SQL files initialize and seed the
 catalogue (expected count: 200). Docker keeps the database in a named volume,
 so it survives container restarts and code updates. Do not run `docker compose
 down -v` unless you intend to delete the database.
+
+Chroma is bound to loopback on port 8001 by default. It stores recommendation
+evidence in a separate named volume. The backend indexes the Markdown on its
+first recommendation request.
 
 Compose initializes the database admin role using `POSTGRES_USER`, so the role
 is `vehicle_app`; a separate `postgres` database role may not exist. To change

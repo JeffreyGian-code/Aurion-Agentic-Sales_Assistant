@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.models.SearchRequest import SortOrder
+from app.models.SearchRequest import SearchRequest, SortOrder
 from app.models.vehicle import Vehicle
 
 
@@ -24,4 +24,12 @@ class VehicleRepository(ABC):
         self,
         vehicle_id: int,
     ) -> Vehicle | None:
+        pass
+
+    @abstractmethod
+    def get_by_ids(self, vehicle_ids: list[int]) -> list[Vehicle]:
+        pass
+
+    @abstractmethod
+    def search_candidates(self, request: SearchRequest) -> list[Vehicle]:
         pass

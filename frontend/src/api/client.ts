@@ -159,13 +159,14 @@ export interface ServiceCheck {
 
 export interface ChatUsage {
   calls: number
-  limit: number
+  limit: number | null
   resets_at: number | null
 }
 
 export function validUsage(value: unknown): value is ChatUsage {
   if (!value || typeof value !== 'object') return false
   const u = value as ChatUsage
+  if (u.limit === null) return u.calls === 0 && u.resets_at === null
   return Number.isInteger(u.calls) && Number.isInteger(u.limit) && u.limit > 0 && u.calls >= 0 && u.calls <= u.limit &&
     (u.calls === 0 ? u.resets_at === null : Number.isFinite(u.resets_at))
 }
