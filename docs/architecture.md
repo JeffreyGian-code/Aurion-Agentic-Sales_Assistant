@@ -1,5 +1,8 @@
 # Architecture
 
+For the current system overview and a walkthrough of Chroma-backed
+recommendations, see [How Aurion works](system-architecture-and-rag.md).
+
 This document explains how the Vehicle Sales Assistant is built and how a
 request moves through it. For setup and commands, see the [README](../README.md).
 
