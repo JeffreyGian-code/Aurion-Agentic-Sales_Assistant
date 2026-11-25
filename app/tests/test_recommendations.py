@@ -15,9 +15,33 @@ from app.api.main import app
 from app.api.rate_limit import limiter
 from app.models.SearchRequest import SearchRequest
 from app.repositories import postgres_vehicle_repository
-from app.repositories.vehicle_knowledge import TABLE_HEADER, VehicleKnowledge, verified_evidence
+from app.repositories.vehicle_knowledge import EvidenceMatch, TABLE_HEADER, VehicleKnowledge, verified_evidence
 from app.services.recommendation_service import RecommendationService
 from app.tools.agent_tools import AgentTools
+
+
+class FixtureIndex:
+    def __init__(self, markdown):
+        self.markdown = markdown
+
+    def semantic_matches(self, preferences, vehicle_ids):
+        topics = {
+            "easy in narrow city streets": "commuting",
+            "smooth automatic driving": "automatic",
+            "close parking": "parking",
+        }
+        return [
+            [
+                EvidenceMatch(entry, 0.9 if entry.evidence.topic == topics.get(phrase) else 0.1)
+                for entry in self.markdown.all_entries()
+                if vehicle_ids is None or entry.id in vehicle_ids
+            ]
+            for phrase in preferences
+        ]
+
+    def requirement_entries(self, topics):
+        return [entry for entry in self.markdown.all_entries()
+                if entry.evidence.topic in topics and entry.evidence.strength == "confirmed"]
 
 
 @pytest.fixture
@@ -45,12 +69,13 @@ def tools(monkeypatch, tmp_path):
 | 4 | Brand | One | Plus | Hatchback | commuting | confirmed | City driving evidence for Plus. | Test source |
 | 4 | Brand | One | Plus | Hatchback | automatic | confirmed | Plus is automatic. | Test source |
 | 5 | Brand | Five | Base | Hatchback | commuting | indicative | City driving potential. | Test source |
+| 5 | Brand | Five | Base | Hatchback | parking | indicative | Parking potential. | Test source |
 | 6 | Brand | Six | Old trim | Hatchback | automatic | confirmed | Old trim is automatic. | Test source |
 | 7 | Brand | Seven | Base | Hatchback | commuting | confirmed | Removed variant. | Test source |
 """, encoding="utf-8")
     tools = AgentTools()
     tools.recommendation_service = RecommendationService(
-        tools.vehicle_service.repository, VehicleKnowledge(path),
+        tools.vehicle_service.repository, FixtureIndex(VehicleKnowledge(path)),
     )
     yield tools
     engine.dispose()
@@ -60,10 +85,11 @@ def tool(tools, name):
     return next(tool for tool in tools.get_tools() if tool.name == name)
 
 
-def recommend(tools, priorities, **filters):
+def recommend(tools, preferences=(), required_topics=(), **filters):
     return tool(tools, "recommend_vehicles").invoke({
-        "request": {"priorities": priorities, "filters": filters or None},
-    })["recommendations"]
+        "request": {"preferences": list(preferences), "required_topics": list(required_topics),
+                    "filters": filters or None},
+    })
 
 
 def ids(results):
@@ -78,7 +104,7 @@ def test_sql_only_search_keeps_vehicles_without_markdown(tools):
 def test_kb_led_fetches_exact_ids_once_and_omits_missing_row(tools):
     repository = tools.vehicle_service.repository
     with patch.object(repository, "get_by_ids", wraps=repository.get_by_ids) as lookup:
-        result = recommend(tools, [{"topic": "commuting"}])
+        result = recommend(tools, ["easy in narrow city streets"])["recommendations"]
     lookup.assert_called_once_with([4, 5, 7])
     assert ids(result) == [4, 5]
     assert result[0]["vehicle"]["price"] == 400
@@ -86,42 +112,47 @@ def test_kb_led_fetches_exact_ids_once_and_omits_missing_row(tools):
     assert result[0]["evidence"][0]["source"] == "Test source"
 
 
-def test_combined_ranks_all_eligible_variants_and_checks_evidence_by_id(tools, monkeypatch):
+def test_combined_limits_semantic_search_to_all_sql_candidates(tools):
     knowledge = tools.recommendation_service.knowledge
-    retrieve = knowledge.retrieve
-
-    def miss_plus(topics):
-        return {key: value for key, value in retrieve(topics).items() if key != 4}
-
-    monkeypatch.setattr(knowledge, "retrieve", miss_plus)
     repository = tools.vehicle_service.repository
-    with patch.object(repository, "get_by_ids") as lookup:
-        result = recommend(tools, [{"topic": "commuting"}], max_price=450)
+    with (
+        patch.object(repository, "get_by_ids") as lookup,
+        patch.object(knowledge, "semantic_matches", wraps=knowledge.semantic_matches) as query,
+    ):
+        result = recommend(tools, ["easy in narrow city streets"], max_price=450)["recommendations"]
     lookup.assert_not_called()
-    assert ids(result) == [4, 1, 2]
-    assert result[0]["match"] == "confirmed_match"
-    assert result[1]["match"] == "budget_match"
-    assert result[1]["evidence"] == []
+    query.assert_called_once_with(["easy in narrow city streets"], [1, 2, 3, 4])
+    assert ids(result) == [4]
+    assert result[0]["match"] == "budget_match"
 
 
 def test_budget_match_can_include_indicative_evidence(tools):
-    result = recommend(tools, [{"topic": "commuting"}], min_price=500, max_price=500)
+    result = recommend(tools, ["easy in narrow city streets"], min_price=500, max_price=500)["recommendations"]
     assert ids(result) == [5]
     assert result[0]["match"] == "budget_match"
     assert result[0]["evidence"][0]["strength"] == "indicative"
 
 
 def test_firm_requirement_excludes_unverified_and_stale_variants(tools):
-    required = [{"topic": "automatic", "required": True}]
-    assert ids(recommend(tools, required, max_price=650)) == [4]
-    assert recommend(tools, required, max_price=399) == []
-    assert ids(recommend(tools, [{"topic": "automatic"}], max_price=650)) == [4, 1, 2]
+    required = ["automatic"]
+    assert ids(recommend(tools, required_topics=required, max_price=650)["recommendations"]) == [4]
+    assert recommend(tools, required_topics=required, max_price=399)["status"] == "requirements_unverified"
+    assert ids(recommend(tools, ["easy in narrow city streets"], required, max_price=650)["recommendations"]) == [4]
+    assert ids(recommend(tools, ["smooth automatic driving"], max_price=650)["recommendations"]) == [4]
+
+
+def test_weak_evidence_asks_for_clarification_and_priority_order_breaks_ties(tools):
+    result = recommend(tools, ["premium sound system"], max_price=450)
+    assert result == {"status": "clarification_needed", "recommendations": []}
+    result = recommend(tools, ["easy in narrow city streets", "close parking"])
+    assert ids(result["recommendations"]) == [5, 4]
+    assert result["recommendations"][1]["matched_preferences"] == ["easy in narrow city streets"]
 
 
 def test_inventory_failure_differs_from_no_matches(tools, monkeypatch):
     recommendation = tool(tools, "recommend_vehicles")
-    args = {"request": {"priorities": [{"topic": "commuting"}], "filters": {"max_price": 1}}}
-    assert recommendation.invoke(args) == {"recommendations": []}
+    args = {"request": {"preferences": ["easy in narrow city streets"], "filters": {"max_price": 1}}}
+    assert recommendation.invoke(args) == {"status": "no_catalogue_matches", "recommendations": []}
 
     def unavailable(request):
         raise OperationalError("private SQL", {}, RuntimeError("private connection details"))
@@ -172,7 +203,7 @@ def test_completed_shortlist_is_restored_in_order_for_follow_up(tools):
     model = FollowUpModel(responses=[
         AIMessage(content="", tool_calls=[{
             "name": "recommend_vehicles", "id": "recommendation",
-            "args": {"request": {"priorities": [{"topic": "commuting"}]}},
+            "args": {"request": {"preferences": ["easy in narrow city streets"]}},
         }]),
         AIMessage(content="1. One Plus (ID 4).\n2. Five Base (ID 5)."),
         AIMessage(content="The second one was Five Base (ID 5)."),

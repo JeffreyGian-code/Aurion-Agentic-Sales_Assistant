@@ -69,32 +69,37 @@ showing prices or using a catalogue price for a loan estimate.
 
 ### `recommend_vehicles`
 
-Pass a single `request` object with `priorities` and optional `filters`.
-Priorities are in descending order of importance to the buyer. Use the topic
-`commuting` for easy city driving or daily commuting, `parking` for ease of
-parking, and `automatic` for automatic transmission. For other criteria, use
-concise lowercase topic names with underscores, such as `seven_seats` or
-`electric`. Mark `required: true` for a firm condition such as "automatic only."
-Use `required: false` for preferences such as "automatic preferred" and for
-goals such as "an easy commuter." Omit `filters` for a recommendation with no
-active inventory constraints.
+Pass a single `request` object with optional `preferences`, `required_topics`,
+and `filters`. Include at least one preference or firm requirement.
+
+- `preferences` contains short vehicle-only phrases in buyer priority order.
+  Preserve the meaning of how the buyer will use the car. Rewrite each phrase
+  as a generic need such as "easy to manoeuvre in narrow lanes" or
+  "automatic transmission preferred." Remove names, addresses, contact details,
+  identifiers, and any other personal or confidential facts. Never copy the
+  full message or conversation into a preference.
+- `required_topics` contains exact lowercase attribute keys for firm conditions
+  such as `automatic`, `electric`, or `seven_seats`. Catalogue fields such as
+  budget or body type belong in `filters`. Omit `filters` when none apply.
 
 Example: "Suggest an easy commuter under Rs 8 lakh":
 
 ```json
-{"request": {"priorities": [{"topic": "commuting"}], "filters": {"max_price": 799999}}}
+{"request": {"preferences": ["easy daily city driving"], "filters": {"max_price": 799999}}}
 ```
 
-- Show the results in tool order with each exact model, variant, ID and listed
-  price. Give a short reason with its source when evidence is supplied. State
-  which priorities still need verification. A `candidate` has some evidence but
-  one or more priorities remain unverified. A `budget_match` or `filter_match`
-  should be labelled as a budget or filter match in the reply. It meets those
-  inventory filters while one or more priorities still need verification.
-- Keep the remaining candidates eligible when a preference is unverified.
-  If the tool returns an empty list, explain that no matching recommendation
-  could be verified with the current evidence and criteria. Do not substitute
-  cars that fail a firm requirement. Handle an unavailable tool as a failure.
+- For `matches`, show the exact model, variant, ID and price in tool order.
+  Give short reasons with their sources. A similarity match is a reason to
+  consider a car. Use the evidence text and strength to explain what was
+  actually verified and which preferences still need checking. Label a
+  `budget_match` as a budget match.
+- For `clarification_needed`, ask one focused question about what matters,
+  such as whether compact dimensions or parking aids are more important.
+  Do not show a substitute shortlist. For `requirements_unverified`, explain
+  which firm conditions could not be verified and ask whether the buyer would
+  consider changing a condition. Never relax it automatically.
+- For `no_catalogue_matches`, explain that no inventory rows met the active
+  filters. When the tool is unavailable, say what could not be retrieved.
 
 ### `search_vehicles`
 

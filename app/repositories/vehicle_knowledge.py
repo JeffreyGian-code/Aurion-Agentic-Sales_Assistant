@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -27,9 +28,17 @@ class KnowledgeEntry(BaseModel):
 
 
 class KnowledgeIndex(Protocol):
-    def retrieve(self, topics: list[str]) -> dict[int, list[KnowledgeEntry]]: ...
+    def semantic_matches(
+        self, preferences: list[str], vehicle_ids: list[int] | None,
+    ) -> list[list["EvidenceMatch"]]: ...
 
-    def entries_for_ids(self, vehicle_ids: list[int]) -> dict[int, list[KnowledgeEntry]]: ...
+    def requirement_entries(self, topics: list[str]) -> list[KnowledgeEntry]: ...
+
+
+@dataclass(frozen=True)
+class EvidenceMatch:
+    entry: KnowledgeEntry
+    similarity: float
 
 
 def verified_evidence(vehicle: Vehicle, entries: list[KnowledgeEntry]) -> dict[str, VehicleEvidence]:

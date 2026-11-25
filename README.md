@@ -73,11 +73,19 @@ docker compose up -d --wait
 `aurion_chroma_data` volume. Set `CHROMA_PORT` in `.env` to change the host port,
 or `CHROMA_URL` to point the backend at another Chroma server.
 
-The first recommendation after starting the backend indexes the current
-`data/vehicle_knowledge.md` in Chroma. Restart the backend after editing the
-Markdown so it can index the new revision. Recommendations use Chroma for
-evidence lookup and PostgreSQL for exact variant records and prices. SQL-only
-search still works if Chroma is unavailable.
+Build the recommendation index after Chroma starts and whenever you edit
+`data/vehicle_knowledge.md`:
+
+```powershell
+python -m app.index_vehicle_knowledge
+```
+
+The command sends public evidence text to OpenRouter's NVIDIA embedding model
+and stores its vectors in Chroma. It reuses a complete collection for the same
+revision. After rebuilding, restart a running backend to load the new revision.
+Recommendations use Chroma for semantic evidence lookup and PostgreSQL for the
+exact variants and prices. SQL-only search still works if Chroma is unavailable.
+See [How Aurion works](docs/system-architecture-and-rag.md) for the retrieval flow.
 
 Check Chroma on the default port:
 
@@ -157,6 +165,11 @@ keep tests separate from databases you edit or use for deployment.
 
 For the opt-in evaluation of real model behavior, see the
 [agent test suite guide](docs/test-suite-doc.md).
+
+After building the index, run `python -m app.tests.evaluate_semantic_retrieval`
+to compare semantic retrieval with the former tag lookup. It sends synthetic
+English and Hinglish preferences to OpenRouter and reports development and
+holdout results.
 
 ## Continuous integration
 

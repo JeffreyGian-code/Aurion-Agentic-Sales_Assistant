@@ -12,6 +12,7 @@ from app.repositories.postgres_vehicle_repository import (
     PostgresVehicleRepository,
 )
 from app.repositories.vehicle_knowledge import VehicleKnowledge
+from app.services.embedding_service import EmbeddingError
 from app.services.finance_service import FinanceService
 from app.services.recommendation_service import RecommendationService
 from app.services.vehicle_service import VehicleService, VehicleId
@@ -31,10 +32,9 @@ class AgentTools:
     def recommendation_service(self) -> RecommendationService:
         try:
             entries = VehicleKnowledge().all_entries()
+            return RecommendationService(self.vehicle_service.repository, ChromaVehicleKnowledge(entries))
         except (OSError, ValueError) as exc:
-            raise ChromaKnowledgeError("Could not load Markdown evidence.") from exc
-        knowledge = ChromaVehicleKnowledge(entries)
-        return RecommendationService(self.vehicle_service.repository, knowledge)
+            raise ChromaKnowledgeError("Could not configure recommendation evidence.") from exc
 
     def search_vehicles(
         self,
@@ -59,11 +59,11 @@ class AgentTools:
         """Recommend exact catalogue variants using local evidence and optional inventory filters."""
         try:
             recommendations = self.recommendation_service.recommend(request)
-        except ChromaKnowledgeError as exc:
+        except (ChromaKnowledgeError, EmbeddingError) as exc:
             raise ToolException("Vehicle recommendation evidence is temporarily unavailable.") from exc
         except SQLAlchemyError as exc:
             raise ToolException("Inventory is temporarily unavailable.") from exc
-        return {"recommendations": [item.model_dump(mode="json") for item in recommendations]}
+        return recommendations.model_dump(mode="json")
 
     def get_vehicle_details(
         self,
@@ -113,10 +113,10 @@ class AgentTools:
                 handle_tool_error=True,
                 func=self.recommend_vehicles,
                 name="recommend_vehicles",
-                handle_validation_error="Invalid recommendation criteria. Check topics and filters.",
+                handle_validation_error="Use short vehicle preferences without personal details and check firm requirements and filters.",
                 description=(
                     "Use for qualitative criteria such as commuting, parking or automatic. "
-                    "Pass priorities in buyer order and mark only firm requirements as required. "
+                    "Pass short vehicle-only preference phrases in buyer order and list firm requirements separately. "
                     "Include SearchRequest filters for any active catalogue constraints. Returns "
                     "up to three ranked variants with exact listed prices and sourced evidence."
                 ),
