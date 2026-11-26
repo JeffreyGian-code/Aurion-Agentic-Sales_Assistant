@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 from app.models.recommendation import RecommendationRequest, RecommendationResult, RecommendedVehicle
-from app.repositories.vehicle_knowledge import EvidenceMatch, KnowledgeIndex, verified_evidence
+from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, KnowledgeIndex, verified_evidence
 from app.repositories.vehicle_repository import VehicleRepository
 
 

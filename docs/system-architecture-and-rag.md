@@ -62,9 +62,9 @@ If the buyer first asks for an easy commuter and then says “under ₹8 lakh,�
 
 ### Preparing the knowledge base
 
-The source file is [`data/vehicle_knowledge.md`](../data/vehicle_knowledge.md). Each row records a vehicle ID, its exact variant identity, a topic such as `commuting`, a reason and a source. Evidence is marked **confirmed** when the source verifies the criterion for that exact variant, or **indicative** when it supports considering the variant and leaves the criterion unverified.
+The source file is [`app/RAG/documents/vehicle_knowledge.md`](../app/RAG/documents/vehicle_knowledge.md). Each row in its recommendation evidence table records a vehicle ID, its exact variant identity, a topic such as `commuting`, a reason and a source. Evidence is marked **confirmed** when the source verifies the criterion for that exact variant, or **indicative** when it supports considering the variant and leaves the criterion unverified.
 
-Run `python -m app.index_vehicle_knowledge` to validate the Markdown and build the Chroma collection for that revision. The command sends the public evidence text to OpenRouter's NVIDIA Nemotron embedding model and saves the returned vectors. After editing the Markdown, rebuild the index and restart the backend. During a recommendation, the chat model rewrites the buyer's preferences as short vehicle-only phrases. The backend embeds those phrases with the same model, and Chroma finds passages with similar meaning. Firm requirements still use exact, confirmed evidence.
+Run `python -m app.RAG.ingestion.index_vehicle_knowledge` to validate the Markdown and build the Chroma collection for that revision. The command sends the public evidence text to OpenRouter's NVIDIA Nemotron embedding model and saves the returned vectors. After editing the Markdown, rebuild the index and restart the backend. During a recommendation, the chat model rewrites the buyer's preferences as short vehicle-only phrases. The backend embeds those phrases with the same model, and Chroma finds passages with similar meaning. Firm requirements still use exact, confirmed evidence.
 
 ### Following a recommendation request
 
@@ -110,6 +110,8 @@ For web chat, `APP_ENV=prod` applies a seven-request session cap over 24 hours. 
 |---|---|
 | Web chat and streaming | [`app/api/routes/chat.py`](../app/api/routes/chat.py) |
 | Agent and search instructions | [`app/agents/agent.py`](../app/agents/agent.py), [`app/prompts/vehicle_assistant.md`](../app/prompts/vehicle_assistant.md) |
-| Recommendation rules and ranking | [`app/services/recommendation_service.py`](../app/services/recommendation_service.py) |
-| Evidence loading and retrieval | [`app/repositories/vehicle_knowledge.py`](../app/repositories/vehicle_knowledge.py), [`app/repositories/chroma_vehicle_knowledge.py`](../app/repositories/chroma_vehicle_knowledge.py) |
+| Recommendation rules and ranking | [`app/RAG/recommendations/recommendation_service.py`](../app/RAG/recommendations/recommendation_service.py) |
+| Markdown loading and indexing | [`app/RAG/ingestion/`](../app/RAG/ingestion/) |
+| Embedding client | [`app/RAG/embeddings/`](../app/RAG/embeddings/) |
+| Chroma storage and retrieval | [`app/RAG/retrieval/`](../app/RAG/retrieval/) |
 | Catalogue queries | [`app/repositories/postgres_vehicle_repository.py`](../app/repositories/postgres_vehicle_repository.py) |

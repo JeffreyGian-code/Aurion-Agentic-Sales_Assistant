@@ -2,9 +2,9 @@
 
 from dotenv import load_dotenv
 
-from app.repositories.chroma_vehicle_knowledge import ChromaVehicleKnowledge
-from app.repositories.vehicle_knowledge import VehicleKnowledge
-from app.services.recommendation_service import DEFAULT_MIN_SIMILARITY
+from app.RAG.retrieval.chroma_vehicle_knowledge import ChromaVehicleKnowledge
+from app.RAG.ingestion.vehicle_knowledge import VehicleKnowledge
+from app.RAG.recommendations.recommendation_service import DEFAULT_MIN_SIMILARITY
 
 
 # Each row has a synthetic preference, the supporting topic, and the old route's tag.

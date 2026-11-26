@@ -9,7 +9,7 @@ from app.models.recommendation import VehicleEvidence
 from app.models.vehicle import Vehicle
 
 
-KNOWLEDGE_PATH = Path(__file__).resolve().parents[2] / "data" / "vehicle_knowledge.md"
+KNOWLEDGE_PATH = Path(__file__).resolve().parents[1] / "documents" / "vehicle_knowledge.md"
 TABLE_HEADER = "| ID | Brand | Model | Variant | Body type | Topic | Strength | Reason | Source |"
 
 

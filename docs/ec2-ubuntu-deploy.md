@@ -126,7 +126,7 @@ down -v` unless you intend to delete the database.
 
 Chroma is bound to loopback on port 8001 by default. It stores recommendation
 evidence in a separate named volume. After installing the Python dependencies,
-run `.venv/bin/python -m app.index_vehicle_knowledge` before starting the
+run `.venv/bin/python -m app.RAG.ingestion.index_vehicle_knowledge` before starting the
 backend. Repeat after changing the Markdown evidence, then restart the backend.
 
 Compose initializes the database admin role using `POSTGRES_USER`, so the role

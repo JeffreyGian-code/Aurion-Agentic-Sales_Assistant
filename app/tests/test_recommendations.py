@@ -15,8 +15,8 @@ from app.api.main import app
 from app.api.rate_limit import limiter
 from app.models.SearchRequest import SearchRequest
 from app.repositories import postgres_vehicle_repository
-from app.repositories.vehicle_knowledge import EvidenceMatch, TABLE_HEADER, VehicleKnowledge, verified_evidence
-from app.services.recommendation_service import RecommendationService
+from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, TABLE_HEADER, VehicleKnowledge, verified_evidence
+from app.RAG.recommendations.recommendation_service import RecommendationService
 from app.tools.agent_tools import AgentTools
 
 

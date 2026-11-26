@@ -15,7 +15,7 @@ git pull --ff-only
 # Update backend dependencies and start PostgreSQL and Chroma.
 .venv/bin/python -m pip install -r requirements.txt
 docker compose up -d --wait
-.venv/bin/python -m app.index_vehicle_knowledge
+.venv/bin/python -m app.RAG.ingestion.index_vehicle_knowledge
 
 # Install frontend dependencies and create the production build.
 cd frontend

@@ -74,10 +74,10 @@ docker compose up -d --wait
 or `CHROMA_URL` to point the backend at another Chroma server.
 
 Build the recommendation index after Chroma starts and whenever you edit
-`data/vehicle_knowledge.md`:
+`app/RAG/documents/vehicle_knowledge.md`:
 
 ```powershell
-python -m app.index_vehicle_knowledge
+python -m app.RAG.ingestion.index_vehicle_knowledge
 ```
 
 The command sends public evidence text to OpenRouter's NVIDIA embedding model

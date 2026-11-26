@@ -7,8 +7,8 @@ from uuid import UUID
 import httpx
 
 from app.models.recommendation import VehicleEvidence
-from app.repositories.vehicle_knowledge import EvidenceMatch, KnowledgeEntry
-from app.services.embedding_service import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, OpenRouterEmbeddings
+from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, KnowledgeEntry
+from app.RAG.embeddings.embedding_service import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, OpenRouterEmbeddings
 
 
 COLLECTIONS_PATH = "/api/v2/tenants/default_tenant/databases/default_database/collections"

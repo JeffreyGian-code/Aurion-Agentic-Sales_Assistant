@@ -3,18 +3,18 @@ from functools import cached_property
 from langchain_core.tools import StructuredTool, ToolException
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.RAG.embeddings.embedding_service import EmbeddingError
+from app.RAG.ingestion.vehicle_knowledge import VehicleKnowledge
+from app.RAG.recommendations.recommendation_service import RecommendationService
+from app.RAG.retrieval.chroma_vehicle_knowledge import ChromaKnowledgeError, ChromaVehicleKnowledge
 from app.models.emi import EMIRequest
 from app.models.recommendation import RecommendationRequest
 from app.models.SearchRequest import SearchRequest
 from app.models.vehicle import Vehicle
-from app.repositories.chroma_vehicle_knowledge import ChromaKnowledgeError, ChromaVehicleKnowledge
 from app.repositories.postgres_vehicle_repository import (
     PostgresVehicleRepository,
 )
-from app.repositories.vehicle_knowledge import VehicleKnowledge
-from app.services.embedding_service import EmbeddingError
 from app.services.finance_service import FinanceService
-from app.services.recommendation_service import RecommendationService
 from app.services.vehicle_service import VehicleService, VehicleId
 
 
