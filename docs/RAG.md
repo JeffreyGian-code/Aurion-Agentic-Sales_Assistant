@@ -139,3 +139,44 @@ Chroma persists the evidence vectors in the Docker volume `aurion_chroma_data`. 
 | [recommendation_service.py](/D:/workspace/playground/Agentic-Vehicle-Sales-Assistant-/app/RAG/recommendations/recommendation_service.py) | `RecommendationService` applies inventory filters and firm requirements, asks the retriever for evidence, drops weak matches, and checks the vehicle identity against PostgreSQL. It ranks up to three vehicles by preference match, then price and ID, and returns the supporting reasons and sources. |
 
 The root `app/RAG/__init__.py` and each code folder’s `__init__.py` mark Python packages and describe their purpose. They contain no pipeline logic. Outside `app/RAG`, [agent_tools.py](/D:/workspace/playground/Agentic-Vehicle-Sales-Assistant-/app/tools/agent_tools.py:32) connects the recommendation service to the assistant’s `recommend_vehicles` tool.
+
+
+In Aurion, **the Markdown sets what gets ingested, the Python code sets how it gets embedded, and `.env` supplies credentials and connection settings.**
+
+### Ingestion
+
+Run `python -m app.RAG.ingestion.index_vehicle_knowledge` from the project root. The command reads `app/RAG/documents/vehicle_knowledge.md` and builds one record for each variant listed under `### Seeded catalogue variants`.
+
+For **Hyundai i20 Base**, the indexer takes ID `41` from the variant bullet and creates Chroma record `vehicle:41`. The text it embeds combines the variant name, body type, shared i20 description, and any features verified as present for that exact trim. The parser uses the Markdown sections as record boundaries, so there’s no chunk-size or overlap setting. Manufacturer trim comparisons are stored as reference text for follow-up answers. [Ingestion code](/D:/workspace/playground/Agentic-Vehicle-Sales-Assistant-/app/RAG/ingestion/vehicle_knowledge.py)
+
+### Embedding and search settings
+
+| Parameter | Current setting |
+|---|---|
+| Embedding model | `nvidia/nemotron-3.5-embed-1b:free`, set in Python |
+| Vector format | 2,048 floating-point values per text |
+| Indexing mode | `passage`, with up to 32 descriptions per batch |
+| Search mode | `query`, using the same model for the buyer’s short preference phrases |
+| Similarity | Cosine similarity in Chroma |
+| Minimum similarity | `RAG_MIN_SIMILARITY` in `.env`, default `0.2199` |
+
+Chroma stores the original description, vector, and catalogue metadata together. The collection name fingerprints the content and embedding configuration, so rebuilding reuses a complete collection for the same revision. `OPENROUTER_API_KEY` authenticates embedding calls. `CHROMA_URL` overrides the Chroma address, which defaults to `http://127.0.0.1:8001` unless `CHROMA_PORT` is set. [Embedding client](/D:/workspace/playground/Agentic-Vehicle-Sales-Assistant-/app/RAG/embeddings/embedding_service.py) · [Chroma index](/D:/workspace/playground/Agentic-Vehicle-Sales-Assistant-/app/RAG/retrieval/chroma_vehicle_knowledge.py)
+
+If you edit the descriptions or change the embedding model, rebuild the index and restart the backend. If you only change `RAG_MIN_SIMILARITY`, restart the backend. That setting affects which search hits Aurion accepts.
+
+The settings affect different parts of Aurion. **The description text and embedding model affect what Aurion finds. The similarity cutoff affects which matches it accepts. The batch size affects how the index is built.**
+
+| Setting | What it means | Effect on Aurion |
+|---|---|---|
+| **One description per variant** | Each catalogue variant gets one searchable text record. It combines the shared model description, the variant name and body type, and any verified equipment for that trim. | Every indexed variant can appear in search. If two trims share nearly the same description, they may score similarly. Their exact equipment and prices still come from the records tied to their IDs. |
+| **Record ID `vehicle:41`** | This is the Chroma record for PostgreSQL vehicle ID `41`. | It lets Aurion turn a search hit into the exact variant and listed price. It also lets Aurion fetch the same description when the buyer says “tell me more about that car.” |
+| **Model `nvidia/nemotron-3.5-embed-1b:free`** | This is the model that converts descriptions and buyer preferences into vectors. | It determines how well a phrase like “easy to load shopping bags” matches a description about rear-hatch access. Changing it requires rebuilding the index and using the new model for searches too. |
+| **2,048 dimensions** | Each vector contains 2,048 numbers. This is the output size expected from the configured model. | Chroma compares vectors of the same size. The embedding client rejects responses with a different size. This is a compatibility setting. |
+| **`passage` and `query` modes** | `passage` is used for descriptions during indexing. `query` is used for short buyer phrases when searching. | The same model represents both sides of the comparison while accounting for their different roles. |
+| **Batch size `32`** | The indexer sends up to 32 descriptions in one embedding request. | It affects the number and size of requests during indexing. It leaves the text in each record and the search ranking unchanged. |
+| **Cosine similarity** | Chroma compares the direction of the query vector with each description vector. A higher score means a closer match according to the embedding model. | It helps rank eligible cars by how closely their descriptions match the buyer’s preference. A high score alone gives no confirmation that a trim has a particular feature. |
+| **`RAG_MIN_SIMILARITY=0.2199`** | This is the minimum score a hit must reach to count as a preference match. | A score of `0.31` passes, while `0.18` is dropped. Raising the cutoff can reduce weak matches and produce more clarification questions. Lowering it can return more candidates with weaker evidence. The score is a similarity measure, so `0.2199` does not mean 22% confidence. |
+
+`OPENROUTER_API_KEY` authenticates the embedding requests. `CHROMA_URL` and `CHROMA_PORT` tell Aurion where to reach Chroma. These settings affect whether the service can connect. The collection fingerprint tells Aurion which index revision matches the current descriptions and embedding configuration.
+
+For **“a hatchback under ₹9 lakh that’s easy to park,”** PostgreSQL applies the budget and body-type filters first. Chroma then ranks the eligible descriptions for `easy to park`, and the cutoff removes weak hits. A firm requirement such as **“must have a parking camera”** needs verified equipment evidence for the exact trim. That check is independent of the similarity score.
