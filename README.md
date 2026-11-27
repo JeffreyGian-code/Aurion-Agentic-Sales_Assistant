@@ -80,8 +80,8 @@ Build the recommendation index after Chroma starts and whenever you edit
 python -m app.RAG.ingestion.index_vehicle_knowledge
 ```
 
-The command sends public evidence text to OpenRouter's NVIDIA embedding model
-and stores its vectors in Chroma. It reuses a complete collection for the same
+The command sends the public variant descriptions to OpenRouter's NVIDIA embedding model
+and stores one vector per catalogue variant in Chroma. It reuses a complete collection for the same
 revision. After rebuilding, restart a running backend to load the new revision.
 Recommendations use Chroma for semantic evidence lookup and PostgreSQL for the
 exact variants and prices. SQL-only search still works if Chroma is unavailable.
@@ -167,9 +167,8 @@ For the opt-in evaluation of real model behavior, see the
 [agent test suite guide](docs/test-suite-doc.md).
 
 After building the index, run `python -m app.tests.evaluate_semantic_retrieval`
-to compare semantic retrieval with the former tag lookup. It sends synthetic
-English and Hinglish preferences to OpenRouter and reports development and
-holdout results.
+to check the live description search with synthetic buyer preferences. It sends the
+preferences to OpenRouter and reports whether the expected models appear in the shortlist.
 
 ## Continuous integration
 

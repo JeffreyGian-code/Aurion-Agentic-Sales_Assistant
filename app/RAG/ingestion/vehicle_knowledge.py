@@ -1,16 +1,24 @@
-from collections import defaultdict
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from pydantic import BaseModel, Field
 
-from app.models.recommendation import VehicleEvidence
+from app.models.recommendation import Topic, VehicleEvidence
 from app.models.vehicle import Vehicle
 
 
 KNOWLEDGE_PATH = Path(__file__).resolve().parents[1] / "documents" / "vehicle_knowledge.md"
-TABLE_HEADER = "| ID | Brand | Model | Variant | Body type | Topic | Strength | Reason | Source |"
+VARIANT_LINE = re.compile(r"^- \*\*ID (\d+) — (.+?)\*\* · ([^·]+)(.*)$")
+FACT_LINE = re.compile(r"^- \*\*ID (\d+) · ([a-z][a-z0-9_]{0,59}) · (present|absent)\*\*\. (.+) \[Source\]\((https?://\S+)\)$")
+
+
+class TrimFact(BaseModel):
+    topic: Topic
+    present: bool
+    reason: str = Field(min_length=1)
+    source: str = Field(min_length=1)
 
 
 class KnowledgeEntry(BaseModel):
@@ -20,19 +28,29 @@ class KnowledgeEntry(BaseModel):
     variant: str | None
     vehicle_type: str = Field(min_length=1)
     evidence: VehicleEvidence
+    manufacturer_context: str = ""
+    trim_rank: int | None = Field(default=None, ge=1)
+    facts: list[TrimFact] = Field(default_factory=list)
 
     @property
-    def identity(self):
-        return (self.brand.casefold(), self.model.casefold(),
-                (self.variant or "").casefold(), self.vehicle_type.casefold())
+    def passage(self) -> str:
+        return " ".join([self.evidence.reason, *(fact.reason for fact in self.facts if fact.present)])
+
+    def matches_vehicle(self, vehicle: Vehicle) -> bool:
+        return self.id == vehicle.id and identity(self) == identity(vehicle)
+
+
+def identity(vehicle: KnowledgeEntry | Vehicle) -> tuple[str, str, str, str]:
+    return (vehicle.brand.casefold(), vehicle.model.casefold(),
+            (vehicle.variant or "").casefold(), vehicle.vehicle_type.casefold())
 
 
 class KnowledgeIndex(Protocol):
     def semantic_matches(
         self, preferences: list[str], vehicle_ids: list[int] | None,
     ) -> list[list["EvidenceMatch"]]: ...
-
     def requirement_entries(self, topics: list[str]) -> list[KnowledgeEntry]: ...
+    def entries_for_ids(self, vehicle_ids: list[int]) -> dict[int, KnowledgeEntry]: ...
 
 
 @dataclass(frozen=True)
@@ -42,64 +60,81 @@ class EvidenceMatch:
 
 
 def verified_evidence(vehicle: Vehicle, entries: list[KnowledgeEntry]) -> dict[str, VehicleEvidence]:
-    identity = (vehicle.brand.casefold(), vehicle.model.casefold(),
-                (vehicle.variant or "").casefold(), vehicle.vehicle_type.casefold())
     return {
-        entry.evidence.topic: entry.evidence for entry in entries
-        if entry.id == vehicle.id and entry.identity == identity
+        fact.topic: VehicleEvidence(
+            topic=fact.topic, strength="confirmed", reason=fact.reason, source=fact.source,
+        )
+        for entry in entries if entry.matches_vehicle(vehicle)
+        for fact in entry.facts if fact.present
     }
 
 
 class VehicleKnowledge:
-    """Index the local Markdown evidence by topic and by catalogue variant ID."""
+    """Read model descriptions and catalogue variant lists from Markdown."""
 
     def __init__(self, path: Path = KNOWLEDGE_PATH):
-        self._entries: dict[int, list[KnowledgeEntry]] = defaultdict(list)
-        self._ids_by_topic: dict[str, set[int]] = defaultdict(set)
-        ids_by_identity = {}
-        in_table = False
-        for number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            line = raw_line.strip()
-            if line == TABLE_HEADER:
-                in_table = True
+        self._entries: dict[int, KnowledgeEntry] = {}
+        identities = set()
+        source = f"app/RAG/documents/{path.name}"
+        sections = re.split(r"^## (.+)$", path.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        for name, body in zip(sections[1::2], sections[2::2], strict=True):
+            blocks = re.split(r"^### (.+)$", body, flags=re.MULTILINE)
+            parts = dict(zip(blocks[1::2], blocks[2::2], strict=True))
+            if "Seeded catalogue variants" not in parts:
                 continue
-            if not line.startswith("|"):
-                in_table = False
-                continue
-            if not in_table:
-                raise ValueError(f"{path}:{number}: unexpected knowledge table")
-            cells = [cell.strip() for cell in line.strip("|").split("|")]
-            if len(cells) == 9 and all(cell == "---" for cell in cells):
-                continue
-            try:
-                vehicle_id, brand, model, variant, body_type, topic, strength, reason, source = cells
-                entry = KnowledgeEntry(
-                    id=vehicle_id, brand=brand, model=model, variant=variant or None,
-                    vehicle_type=body_type,
-                    evidence=VehicleEvidence(topic=topic, strength=strength, reason=reason, source=source),
+            name = name.strip()
+            description = " ".join(blocks[0].split())
+            if not description:
+                raise ValueError(f"{path}: missing description for {name}")
+            facts = {}
+            for line in parts.get("Verified catalogue equipment", "").splitlines():
+                if not line.strip():
+                    continue
+                match = FACT_LINE.fullmatch(line.strip())
+                if not match:
+                    raise ValueError(f"{path}: invalid verified equipment row for {name}")
+                vehicle_id, topic, status, reason, citation = match.groups()
+                vehicle_facts = facts.setdefault(int(vehicle_id), {})
+                if topic in vehicle_facts:
+                    raise ValueError(f"{path}: duplicate equipment topic for vehicle {vehicle_id}")
+                vehicle_facts[topic] = TrimFact(
+                    topic=topic, present=status == "present", reason=reason, source=citation,
                 )
-            except ValueError as exc:
-                raise ValueError(f"{path}:{number}: invalid vehicle evidence row") from exc
-            existing = self._entries[entry.id]
-            variant_key = entry.identity[:3]
-            if (
-                (existing and existing[0].identity != entry.identity)
-                or ids_by_identity.get(variant_key, entry.id) != entry.id
-                or entry.id in self._ids_by_topic[topic]
-            ):
-                raise ValueError(f"{path}:{number}: conflicting vehicle ID or duplicate topic")
-            ids_by_identity[variant_key] = entry.id
-            existing.append(entry)
-            self._ids_by_topic[topic].add(entry.id)
+
+            for line in parts["Seeded catalogue variants"].splitlines():
+                if not line.strip():
+                    continue
+                match = VARIANT_LINE.fullmatch(line.strip())
+                if not match:
+                    raise ValueError(f"{path}: invalid catalogue variant row for {name}")
+                vehicle_id, label, body_type, notes = match.groups()
+                if label != name and not label.startswith(f"{name} "):
+                    raise ValueError(f"{path}: variant {label} is outside the {name} section")
+                vehicle_id = int(vehicle_id)
+                rank = re.search(r"· Trim rank (\d+)(?:\s*·|$)", notes)
+                brand, model = name.split(" ", 1)
+                if name.startswith("Maruti Suzuki "):
+                    brand, model = "Maruti Suzuki", name.removeprefix("Maruti Suzuki ")
+                entry = KnowledgeEntry(
+                    id=vehicle_id, brand=brand, model=model, variant=label[len(name):].strip() or None,
+                    vehicle_type=body_type.strip(),
+                    evidence=VehicleEvidence(
+                        topic="vehicle_description", strength="indicative",
+                        reason=f"{label} is a {body_type.strip().lower()}. {description}",
+                        source=f"{source}#{re.sub(r'[^a-z0-9 -]', '', name.lower()).replace(' ', '-')}",
+                    ),
+                    manufacturer_context=parts.get("Manufacturer trim comparison", "").strip(),
+                    trim_rank=int(rank[1]) if rank else None, facts=list(facts.pop(vehicle_id, {}).values()),
+                )
+                variant_identity = identity(entry)[:3]
+                if vehicle_id in self._entries or variant_identity in identities:
+                    raise ValueError(f"{path}: conflicting vehicle ID or variant identity for {vehicle_id}")
+                self._entries[vehicle_id] = entry
+                identities.add(variant_identity)
+            if facts:
+                raise ValueError(f"{path}: verified equipment references IDs outside {name}: {sorted(facts)}")
         if not self._entries:
-            raise ValueError(f"{path}: missing vehicle evidence")
-
-    def retrieve(self, topics: list[str]) -> dict[int, list[KnowledgeEntry]]:
-        ids = {vehicle_id for topic in topics for vehicle_id in self._ids_by_topic.get(topic, ())}
-        return {vehicle_id: self._entries[vehicle_id] for vehicle_id in sorted(ids)}
-
-    def entries_for_ids(self, vehicle_ids: list[int]) -> dict[int, list[KnowledgeEntry]]:
-        return {vehicle_id: self._entries[vehicle_id] for vehicle_id in vehicle_ids if vehicle_id in self._entries}
+            raise ValueError(f"{path}: missing catalogue variants")
 
     def all_entries(self) -> list[KnowledgeEntry]:
-        return [entry for entries in self._entries.values() for entry in entries]
+        return list(self._entries.values())

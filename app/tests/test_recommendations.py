@@ -15,7 +15,7 @@ from app.api.main import app
 from app.api.rate_limit import limiter
 from app.models.SearchRequest import SearchRequest
 from app.repositories import postgres_vehicle_repository
-from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, TABLE_HEADER, VehicleKnowledge, verified_evidence
+from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, VehicleKnowledge
 from app.RAG.recommendations.recommendation_service import RecommendationService
 from app.tools.agent_tools import AgentTools
 
@@ -25,14 +25,14 @@ class FixtureIndex:
         self.markdown = markdown
 
     def semantic_matches(self, preferences, vehicle_ids):
-        topics = {
-            "easy in narrow city streets": "commuting",
-            "smooth automatic driving": "automatic",
-            "close parking": "parking",
+        matching_ids = {
+            "easy in narrow city streets": {4, 5, 7},
+            "smooth automatic driving": {4},
+            "close parking": {5},
         }
         return [
             [
-                EvidenceMatch(entry, 0.9 if entry.evidence.topic == topics.get(phrase) else 0.1)
+                EvidenceMatch(entry, 0.9 if entry.id in matching_ids.get(phrase, ()) else 0.1)
                 for entry in self.markdown.all_entries()
                 if vehicle_ids is None or entry.id in vehicle_ids
             ]
@@ -41,7 +41,10 @@ class FixtureIndex:
 
     def requirement_entries(self, topics):
         return [entry for entry in self.markdown.all_entries()
-                if entry.evidence.topic in topics and entry.evidence.strength == "confirmed"]
+                if any(fact.present and fact.topic in topics for fact in entry.facts)]
+
+    def entries_for_ids(self, vehicle_ids):
+        return {entry.id: entry for entry in self.markdown.all_entries() if entry.id in vehicle_ids}
 
 
 @pytest.fixture
@@ -65,13 +68,37 @@ def tools(monkeypatch, tmp_path):
         """)
     monkeypatch.setattr(postgres_vehicle_repository, "engine", engine)
     path = tmp_path / "vehicles.md"
-    path.write_text(f"""{TABLE_HEADER}
-| 4 | Brand | One | Plus | Hatchback | commuting | confirmed | City driving evidence for Plus. | Test source |
-| 4 | Brand | One | Plus | Hatchback | automatic | confirmed | Plus is automatic. | Test source |
-| 5 | Brand | Five | Base | Hatchback | commuting | indicative | City driving potential. | Test source |
-| 5 | Brand | Five | Base | Hatchback | parking | indicative | Parking potential. | Test source |
-| 6 | Brand | Six | Old trim | Hatchback | automatic | confirmed | Old trim is automatic. | Test source |
-| 7 | Brand | Seven | Base | Hatchback | commuting | confirmed | Removed variant. | Test source |
+    path.write_text("""## Brand One
+City driving evidence for One.
+
+### Seeded catalogue variants
+- **ID 1 — Brand One Base** · Hatchback · ₹100 · Trim rank 1
+- **ID 4 — Brand One Plus** · Hatchback · ₹400 · Trim rank 2
+
+### Verified catalogue equipment
+- **ID 1 · automatic · absent**. Base is manual. [Source](https://fixture.example/base)
+- **ID 4 · automatic · present**. Plus is automatic. [Source](https://fixture.example/plus)
+
+## Brand Five
+City driving potential.
+
+### Seeded catalogue variants
+- **ID 5 — Brand Five Base** · Hatchback · ₹500
+
+## Brand Six
+Former catalogue specification.
+
+### Seeded catalogue variants
+- **ID 6 — Brand Six Old trim** · Hatchback · ₹600
+
+### Verified catalogue equipment
+- **ID 6 · automatic · present**. Old trim is automatic. [Source](https://fixture.example/old)
+
+## Brand Seven
+Removed variant.
+
+### Seeded catalogue variants
+- **ID 7 — Brand Seven Base** · Hatchback · ₹700
 """, encoding="utf-8")
     tools = AgentTools()
     tools.recommendation_service = RecommendationService(
@@ -109,7 +136,7 @@ def test_kb_led_fetches_exact_ids_once_and_omits_missing_row(tools):
     assert ids(result) == [4, 5]
     assert result[0]["vehicle"]["price"] == 400
     assert result[0]["vehicle"]["variant"] == "Plus"
-    assert result[0]["evidence"][0]["source"] == "Test source"
+    assert result[0]["evidence"][0]["source"] == "app/RAG/documents/vehicles.md#brand-one"
 
 
 def test_combined_limits_semantic_search_to_all_sql_candidates(tools):
@@ -163,9 +190,12 @@ def test_inventory_failure_differs_from_no_matches(tools, monkeypatch):
 
 def test_markdown_rejects_conflicting_variant_identity(tmp_path):
     path = tmp_path / "invalid.md"
-    path.write_text(f"""{TABLE_HEADER}
-| 9 | Brand | One | Base | Hatchback | commuting | indicative | A reason. | Source |
-| 9 | Brand | One | Plus | Hatchback | parking | indicative | A reason. | Source |
+    path.write_text("""## Brand One
+One description.
+
+### Seeded catalogue variants
+- **ID 9 — Brand One Base** · Hatchback · ₹100
+- **ID 9 — Brand One Plus** · Hatchback · ₹200
 """, encoding="utf-8")
     with pytest.raises(ValueError, match="conflicting vehicle ID"):
         VehicleKnowledge(path)
@@ -174,13 +204,10 @@ def test_markdown_rejects_conflicting_variant_identity(tmp_path):
 def test_seeded_inventory_batch_lookup_and_candidate_search():
     repository = postgres_vehicle_repository.PostgresVehicleRepository()
     knowledge = VehicleKnowledge()
-    entries_by_id = knowledge.retrieve(["commuting"])
-    vehicles = repository.get_by_ids(list(entries_by_id))
-    assert {vehicle.id for vehicle in vehicles} == set(entries_by_id)
-    assert all(
-        "commuting" in verified_evidence(vehicle, entries_by_id[vehicle.id])
-        for vehicle in vehicles
-    )
+    entries = {entry.id: entry for entry in knowledge.all_entries()}
+    vehicles = repository.get_by_ids(list(entries))
+    assert set(entries) == {vehicle.id for vehicle in vehicles} == set(range(1, 201))
+    assert all(entries[vehicle.id].matches_vehicle(vehicle) for vehicle in vehicles)
     candidates = repository.search_candidates(SearchRequest(
         brand="Maruti Suzuki", model="Swift", max_price=800000,
     ))
@@ -197,7 +224,7 @@ def test_completed_shortlist_is_restored_in_order_for_follow_up(tools):
                 saved = next(message for message in messages if isinstance(message, ToolMessage))
                 results = json.loads(saved.content)["recommendations"]
                 assert ids(results) == [4, 5]
-                assert results[1]["evidence"][0]["reason"] == "City driving potential."
+                assert results[1]["evidence"][0]["reason"].endswith("City driving potential.")
             return super()._generate(messages, stop, run_manager, **kwargs)
 
     model = FollowUpModel(responses=[
@@ -223,3 +250,18 @@ def test_completed_shortlist_is_restored_in_order_for_follow_up(tools):
     finally:
         app.dependency_overrides.pop(get_agent)
         limiter.reset()
+
+
+def test_description_and_verified_upgrade_use_exact_ids_and_budget(tools):
+    description = tool(tools, "describe_vehicle").invoke({"vehicle_id": 1})
+    assert description["description"]["reason"].endswith("City driving evidence for One.")
+    compare = tool(tools, "compare_higher_trims")
+    params = {"vehicle_id": 1, "feature": "automatic"}
+    assert compare.invoke({**params, "max_price": 399})["upgrades"] == []
+    result = compare.invoke({**params, "max_price": 400})
+    assert result["status"] == "verified_upgrades"
+    upgrade, = result["upgrades"]
+    assert upgrade["vehicle"]["id"] == 4
+    assert upgrade["price_difference"] == 300
+    assert upgrade["added"][0]["feature"]["source"] == "https://fixture.example/plus"
+    assert compare.invoke({"vehicle_id": 1, "feature": "sunroof"})["status"] == "upgrade_unverified"

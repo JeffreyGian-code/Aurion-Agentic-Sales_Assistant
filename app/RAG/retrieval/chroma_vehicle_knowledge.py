@@ -30,17 +30,19 @@ class ChromaVehicleKnowledge:
         self._url = os.getenv("CHROMA_URL") or f"http://127.0.0.1:{port}"
         self._transport = transport
         self._embeddings = embeddings if embeddings is not None else OpenRouterEmbeddings()
-        self._entries = sorted(entries, key=lambda entry: (entry.id, entry.evidence.topic))
+        self._entries = sorted(entries, key=lambda entry: entry.id)
         self._metadata = [
             {
-                **entry.model_dump(exclude={"evidence"}),
+                **entry.model_dump(exclude={"evidence", "facts", "trim_rank"}),
                 "variant": entry.variant or "",
+                "trim_rank": entry.trim_rank or 0,
+                "facts": json.dumps([fact.model_dump() for fact in entry.facts], ensure_ascii=False),
                 **entry.evidence.model_dump(),
             }
             for entry in self._entries
         ]
         fingerprint = hashlib.sha256(json.dumps(
-            ["semantic-v1", EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, self._metadata],
+            ["vehicle-description-v1", EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, self._metadata],
             sort_keys=True,
         ).encode()).hexdigest()[:32]
         self.collection_name = f"aurion-semantic-{fingerprint}"
@@ -56,10 +58,10 @@ class ChromaVehicleKnowledge:
         if not self._complete(path):
             for offset in range(0, len(self._metadata), INDEX_BATCH_SIZE):
                 batch = self._metadata[offset:offset + INDEX_BATCH_SIZE]
-                passages = [row["reason"] for row in batch]
+                passages = [entry.passage for entry in self._entries[offset:offset + INDEX_BATCH_SIZE]]
                 vectors = self._embeddings.embed(passages, mode="passage")
                 self._request("POST", f"{path}/upsert", {
-                    "ids": [f"{row['id']}:{row['topic']}" for row in batch],
+                    "ids": [f"vehicle:{row['id']}" for row in batch],
                     "documents": passages,
                     "metadatas": batch,
                     "embeddings": vectors,
@@ -97,8 +99,7 @@ class ChromaVehicleKnowledge:
         path = self.active_path
         query = {
             "query_embeddings": self._embeddings.embed(preferences, mode="query"),
-            # Retrieve all eligible evidence in the pilot so multiple passages or
-            # ineligible variants cannot crowd a relevant vehicle out of the shortlist.
+            # Keep every eligible variant available for multi-preference ranking.
             "n_results": len(self._entries),
             "include": ["metadatas", "distances"],
         }
@@ -123,15 +124,20 @@ class ChromaVehicleKnowledge:
     def requirement_entries(self, topics: list[str]) -> list[KnowledgeEntry]:
         if not topics:
             return []
+        ids = [entry.id for entry in self._entries
+               if any(fact.present and fact.topic in topics for fact in entry.facts)]
+        return list(self.entries_for_ids(ids).values())
+
+    def entries_for_ids(self, vehicle_ids: list[int]) -> dict[int, KnowledgeEntry]:
+        if not vehicle_ids:
+            return {}
         result = self._request("POST", f"{self.active_path}/get", {
-            "where": {"$and": [
-                {"topic": {"$in": topics}},
-                {"strength": {"$eq": "confirmed"}},
-            ]},
+            "ids": [f"vehicle:{vehicle_id}" for vehicle_id in vehicle_ids],
             "include": ["metadatas"],
         })
         try:
-            return [self._entry(row) for row in result["metadatas"]]
+            entries = [self._entry(row) for row in result["metadatas"]]
+            return {entry.id: entry for entry in entries}
         except (KeyError, TypeError, ValueError) as exc:
             raise ChromaKnowledgeError("Invalid Chroma evidence response.") from exc
 
@@ -141,6 +147,9 @@ class ChromaVehicleKnowledge:
             id=row["id"], brand=row["brand"], model=row["model"],
             variant=row["variant"] or None, vehicle_type=row["vehicle_type"],
             evidence=VehicleEvidence.model_validate(row),
+            manufacturer_context=row["manufacturer_context"],
+            trim_rank=row["trim_rank"] or None,
+            facts=json.loads(row["facts"]),
         )
 
     def _request(self, method: str, path: str, payload: dict | None = None):

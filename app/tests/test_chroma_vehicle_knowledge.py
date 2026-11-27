@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.RAG.retrieval.chroma_vehicle_knowledge import ChromaKnowledgeError, ChromaVehicleKnowledge
-from app.RAG.ingestion.vehicle_knowledge import TABLE_HEADER, VehicleKnowledge
+from app.RAG.ingestion.vehicle_knowledge import VehicleKnowledge
 from app.RAG.embeddings.embedding_service import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, OpenRouterEmbeddings
 from app.tools.agent_tools import AgentTools
 
@@ -14,18 +14,27 @@ from app.tools.agent_tools import AgentTools
 COLLECTION_ID = "fbb94eb4-115d-4a82-bbd4-3fc4cc152c44"
 
 
+FIXTURE_MARKDOWN = """## Fixture One
+A compact hatchback for narrow streets and city driving.
+
+### Seeded catalogue variants
+- **ID 101 — Fixture One Base** · Hatchback · ₹100
+
+## Fixture Two
+The sedan has a separate boot.
+
+### Seeded catalogue variants
+- **ID 102 — Fixture Two Plus** · Sedan · ₹200
+
+### Verified catalogue equipment
+- **ID 102 · automatic · present**. Automatic transmission. [Source](https://fixture.example/plus)
+"""
+
+
 @pytest.fixture
 def parsed_evidence(tmp_path):
     path = tmp_path / "knowledge.md"
-    path.write_text(f"""# Catalogue overview
-
-A compact hatchback for errands.
-
-{TABLE_HEADER}
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 101 | Fixture | One | Base | Hatchback | parking | indicative | Easy to park in town. | Fixture source |
-| 102 | Fixture | Two | Plus | Sedan | automatic | confirmed | Automatic transmission. | Fixture source |
-""", encoding="utf-8")
+    path.write_text(FIXTURE_MARKDOWN, encoding="utf-8")
     return VehicleKnowledge(path).all_entries()
 
 
@@ -49,20 +58,24 @@ def test_build_upserts_passage_vectors_and_reuses_complete_collection(parsed_evi
     knowledge = ChromaVehicleKnowledge(parsed_evidence, embeddings=embeddings,
                                        transport=httpx.MockTransport(endpoint))
     assert knowledge.build() == knowledge.build() == 2
-    passages = ["Easy to park in town.", "Automatic transmission."]
+    passages = [entry.passage for entry in parsed_evidence]
     embeddings.embed.assert_called_once_with(passages, mode="passage")
-    assert stored["ids"] == ["101:parking", "102:automatic"]
+    assert stored["ids"] == ["vehicle:101", "vehicle:102"]
     assert stored["documents"] == passages
     assert stored["embeddings"] == embeddings.embed.return_value
-    assert stored["metadatas"][1] == {
-        "id": 102, "brand": "Fixture", "model": "Two", "variant": "Plus", "vehicle_type": "Sedan",
-        "topic": "automatic", "strength": "confirmed", "reason": passages[1], "source": "Fixture source",
-    }
+    assert stored["metadatas"][1]["id"] == 102
+    assert stored["metadatas"][1]["topic"] == "vehicle_description"
+    assert json.loads(stored["metadatas"][1]["facts"])[0]["topic"] == "automatic"
 
 
-def test_retrieval_embeds_queries_and_sends_inventory_and_requirement_filters(parsed_evidence):
+def test_retrieval_embeds_queries_and_fetches_exact_ids_for_requirements(parsed_evidence):
     automatic = parsed_evidence[1]
-    row = {**automatic.model_dump(exclude={"evidence"}), **automatic.evidence.model_dump()}
+    row = {
+        **automatic.model_dump(exclude={"evidence", "facts", "trim_rank"}),
+        **automatic.evidence.model_dump(),
+        "trim_rank": 0,
+        "facts": json.dumps([fact.model_dump() for fact in automatic.facts]),
+    }
     embeddings = Mock()
     embeddings.embed.return_value = [[0.0, 1.0]]
 
@@ -78,7 +91,7 @@ def test_retrieval_embeds_queries_and_sends_inventory_and_requirement_filters(pa
         else:
             assert request.url.path.endswith(f"/{COLLECTION_ID}/get")
             assert json.loads(request.content) == {
-                "where": {"$and": [{"topic": {"$in": ["automatic"]}}, {"strength": {"$eq": "confirmed"}}]},
+                "ids": ["vehicle:102"],
                 "include": ["metadatas"],
             }
             body = {"metadatas": [row]}
@@ -129,14 +142,10 @@ def test_running_chroma_searches_vectors_with_catalogue_id_filter(tmp_path):
                     for phrase in texts]
 
     path = tmp_path / "fixture.md"
-    path.write_text(f"""{TABLE_HEADER}
-| 101 | Fixture | One | Base | Hatchback | commuting | indicative | city driving | Test source |
-| 102 | Fixture | Two | Plus | Sedan | luggage | indicative | separate boot | Test source |
-| 102 | Fixture | Two | Plus | Sedan | automatic | confirmed | automatic transmission | Test source |
-""", encoding="utf-8")
+    path.write_text(FIXTURE_MARKDOWN, encoding="utf-8")
     entries = VehicleKnowledge(path).all_entries()
     embeddings = FixtureEmbeddings()
-    assert ChromaVehicleKnowledge(entries, embeddings=embeddings).build() == 3
+    assert ChromaVehicleKnowledge(entries, embeddings=embeddings).build() == 2
     knowledge = ChromaVehicleKnowledge(entries, embeddings=embeddings)
     group, = knowledge.semantic_matches(["narrow streets"], [101, 102])
     assert group[0].entry.id == 101

@@ -115,6 +115,8 @@ TOOL_LABELS = {
     "search_vehicles": "Searching vehicle inventory…",
     "recommend_vehicles": "Comparing vehicle recommendations…",
     "get_vehicle_details": "Fetching vehicle details…",
+    "describe_vehicle": "Reading the vehicle guide…",
+    "compare_higher_trims": "Comparing available trims…",
     "calculate_emi": "Calculating EMI…",
 }
 STREAM_HEARTBEAT_SECONDS = 15

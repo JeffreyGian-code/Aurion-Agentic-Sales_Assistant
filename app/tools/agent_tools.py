@@ -1,6 +1,8 @@
 from functools import cached_property
+from typing import Annotated
 
 from langchain_core.tools import StructuredTool, ToolException
+from pydantic import Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.RAG.embeddings.embedding_service import EmbeddingError
@@ -8,7 +10,7 @@ from app.RAG.ingestion.vehicle_knowledge import VehicleKnowledge
 from app.RAG.recommendations.recommendation_service import RecommendationService
 from app.RAG.retrieval.chroma_vehicle_knowledge import ChromaKnowledgeError, ChromaVehicleKnowledge
 from app.models.emi import EMIRequest
-from app.models.recommendation import RecommendationRequest
+from app.models.recommendation import RecommendationRequest, Topic
 from app.models.SearchRequest import SearchRequest
 from app.models.vehicle import Vehicle
 from app.repositories.postgres_vehicle_repository import (
@@ -81,6 +83,27 @@ class AgentTools:
 
         return vehicle
 
+    def describe_vehicle(self, vehicle_id: VehicleId) -> dict:
+        """Retrieve the sourced description and feature context for a catalogue vehicle ID."""
+        try:
+            return self.recommendation_service.describe_vehicle(vehicle_id)
+        except ChromaKnowledgeError as exc:
+            raise ToolException("Vehicle descriptions are temporarily unavailable.") from exc
+        except SQLAlchemyError as exc:
+            raise ToolException("Inventory is temporarily unavailable.") from exc
+
+    def compare_higher_trims(
+        self, vehicle_id: VehicleId, feature: Topic | None = None,
+        max_price: Annotated[int | None, Field(ge=0)] = None,
+    ) -> dict:
+        """Find higher trims that verifiably add equipment to the selected vehicle within budget."""
+        try:
+            return self.recommendation_service.compare_higher_trims(vehicle_id, feature, max_price)
+        except ChromaKnowledgeError as exc:
+            raise ToolException("Vehicle trim evidence is temporarily unavailable.") from exc
+        except SQLAlchemyError as exc:
+            raise ToolException("Inventory is temporarily unavailable.") from exc
+
     def calculate_emi(
         self,
         principal: float,
@@ -130,6 +153,8 @@ class AgentTools:
                     "a vehicle using its ID."
                 ),
             ),
+            StructuredTool.from_function(handle_tool_error=True, func=self.describe_vehicle),
+            StructuredTool.from_function(handle_tool_error=True, func=self.compare_higher_trims),
             StructuredTool.from_function(
                 handle_tool_error=True,
                 func=self.calculate_emi,

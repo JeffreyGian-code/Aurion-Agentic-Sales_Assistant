@@ -25,7 +25,7 @@ flowchart LR
 | LangChain agent | Coordinates the work. It gives the language model the chat history and a list of tools. When the model asks for a tool, the backend runs that function and gives the model the result. |
 | OpenRouter | Connects the backend to the language model. The model interprets the buyer's wording, chooses tools and writes the reply. |
 | PostgreSQL | Stores the catalogue. Each row has a vehicle ID, brand, model, variant where available, body type and listed price in rupees. A variant is a specific version of a model, such as Swift Base. |
-| Chroma | Searches the embeddings of Markdown evidence. An embedding is a list of numbers that lets the app compare text by meaning. Each passage keeps its topic, variant ID and source. |
+| Chroma | Searches the embeddings of vehicle descriptions. An embedding is a list of numbers that lets the app compare text by meaning. Each variant record keeps its catalogue ID, description, source and trim context. |
 | SQLite | Stores completed web chat turns and tool results. This lets Aurion reuse a shortlist when the buyer asks about “the second one.” |
 
 [Docker Compose](../docker-compose.yml) runs PostgreSQL and Chroma in separate containers with persistent storage. The [README](../README.md) covers local setup.
@@ -62,7 +62,7 @@ If the buyer first asks for an easy commuter and then says “under ₹8 lakh,�
 
 ### Preparing the knowledge base
 
-The source file is [`app/RAG/documents/vehicle_knowledge.md`](../app/RAG/documents/vehicle_knowledge.md). Each row in its recommendation evidence table records a vehicle ID, its exact variant identity, a topic such as `commuting`, a reason and a source. Evidence is marked **confirmed** when the source verifies the criterion for that exact variant, or **indicative** when it supports considering the variant and leaves the criterion unverified.
+The source file is [`app/RAG/documents/vehicle_knowledge.md`](../app/RAG/documents/vehicle_knowledge.md). The indexer combines each model description with its listed variants to create one record per catalogue ID. Shared descriptions provide context. Verified equipment belongs to the exact variant. The manufacturer comparison is available when the buyer asks for more detail. [RAG architecture and trim evidence format](RAG.md)
 
 Run `python -m app.RAG.ingestion.index_vehicle_knowledge` to validate the Markdown and build the Chroma collection for that revision. The command sends the public evidence text to OpenRouter's NVIDIA Nemotron embedding model and saves the returned vectors. After editing the Markdown, rebuild the index and restart the backend. During a recommendation, the chat model rewrites the buyer's preferences as short vehicle-only phrases. The backend embeds those phrases with the same model, and Chroma finds passages with similar meaning. Firm requirements still use exact, confirmed evidence.
 
@@ -96,7 +96,7 @@ sequenceDiagram
 4. The backend ranks eligible variants by similarity in the buyer's priority order. A cutoff calibrated on example queries filters weak matches. Listed price and vehicle ID break ties. When evidence is weak across the shortlist, Aurion asks a focused follow-up before showing cars.
 5. The model receives the ordered list, including prices, reasons and sources. A car within budget whose commute suitability is still unverified is described as a **budget match**. The backend saves the completed web chat turn with the ordered tool results for follow-up questions.
 
-For example, the seed catalogue lists **Maruti Suzuki Swift Base**, ID **131**, at **₹6,50,000**. PostgreSQL supplies that price. The Markdown points to its hatchback body style as a reason to consider it for city driving. That evidence is indicative, so the reply can describe it as a budget match and explain what makes it worth considering. The pilot covers commuting, parking, luggage and selected body-style preferences. An automatic-only request needs confirmed transmission evidence to produce a match.
+For example, the seed catalogue lists **Maruti Suzuki Swift Base**, ID **131**, at **₹6,50,000**. PostgreSQL supplies that price. The Markdown describes the Swift as a small hatchback for short commutes and errands. Aurion can use that description to explain a budget match or retrieve more context by ID on a follow-up. An automatic-only request needs confirmed transmission evidence for the exact trim.
 
 ## What happens when a search cannot finish
 

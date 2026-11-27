@@ -2,7 +2,8 @@
 from collections import defaultdict
 
 from app.models.recommendation import RecommendationRequest, RecommendationResult, RecommendedVehicle
-from app.RAG.ingestion.vehicle_knowledge import EvidenceMatch, KnowledgeIndex, verified_evidence
+from app.models.SearchRequest import SearchRequest
+from app.RAG.ingestion.vehicle_knowledge import KnowledgeIndex, verified_evidence
 from app.repositories.vehicle_repository import VehicleRepository
 
 
@@ -59,19 +60,11 @@ class RecommendationService:
             vehicles = self.repository.get_by_ids(ids) if ids else []
 
         vehicles_by_id = {vehicle.id: vehicle for vehicle in vehicles}
-        per_priority: list[dict[int, EvidenceMatch]] = []
-        for group in relevant:
-            best_by_id = {}
-            for hit in group:
-                vehicle = vehicles_by_id.get(hit.entry.id)
-                if vehicle is None or not verified_evidence(vehicle, [hit.entry]):
-                    continue
-                current = best_by_id.get(vehicle.id)
-                if current is None or (-hit.similarity, hit.entry.evidence.topic) < (
-                    -current.similarity, current.entry.evidence.topic
-                ):
-                    best_by_id[vehicle.id] = hit
-            per_priority.append(best_by_id)
+        per_priority = [
+            {hit.entry.id: hit for hit in group
+             if hit.entry.id in vehicles_by_id and hit.entry.matches_vehicle(vehicles_by_id[hit.entry.id])}
+            for group in relevant
+        ]
 
         descending = filters is not None and filters.sort_order == "price_desc"
         has_budget = filters is not None and (filters.max_price is not None or filters.min_price is not None)
@@ -84,6 +77,7 @@ class RecommendationService:
             for hit in hits:
                 if hit is not None:
                     reasons[hit.entry.evidence.topic] = hit.entry.evidence
+                    reasons.update(verified_evidence(vehicle, [hit.entry]))
             priority_key = tuple(-hit.similarity if hit is not None else 1 for hit in hits)
             price = -vehicle.price if descending else vehicle.price
             ranked.append((priority_key, price, vehicle.id, RecommendedVehicle(
@@ -96,4 +90,68 @@ class RecommendationService:
         ranked.sort(key=lambda item: item[:3])
         if not ranked:
             return RecommendationResult(status="clarification_needed")
-        return RecommendationResult(status="matches", recommendations=[item[3] for item in ranked[:3]])
+
+        shortlist = []
+        seen_models = set()
+        for _, _, _, recommendation in ranked:
+            vehicle = recommendation.vehicle
+            model = (vehicle.brand.casefold(), vehicle.model.casefold())
+            if (filters is None or filters.model is None) and model in seen_models:
+                continue
+            shortlist.append(recommendation)
+            seen_models.add(model)
+            if len(shortlist) == 3:
+                break
+        return RecommendationResult(status="matches", recommendations=shortlist)
+
+    def describe_vehicle(self, vehicle_id: int) -> dict:
+        vehicle = self.repository.get_by_id(vehicle_id)
+        if vehicle is None:
+            return {"status": "vehicle_not_found"}
+        entry = self.knowledge.entries_for_ids([vehicle.id]).get(vehicle.id)
+        if entry is None or not entry.matches_vehicle(vehicle):
+            return {"status": "description_unavailable", "vehicle": vehicle.model_dump()}
+        return {
+            "status": "description",
+            "vehicle": vehicle.model_dump(),
+            "description": entry.evidence.model_dump(),
+            "verified_features": [fact.model_dump() for fact in entry.facts],
+            "manufacturer_context": entry.manufacturer_context,
+        }
+
+    def compare_higher_trims(self, vehicle_id: int, feature: str | None, max_price: int | None) -> dict:
+        base = self.repository.get_by_id(vehicle_id)
+        if base is None:
+            return {"status": "vehicle_not_found"}
+        candidates = self.repository.search_candidates(SearchRequest(
+            brand=base.brand, model=base.model, min_price=base.price + 1, max_price=max_price,
+        )) if max_price is None or max_price > base.price else []
+        entries = self.knowledge.entries_for_ids([base.id, *(vehicle.id for vehicle in candidates)])
+        base_entry = entries.get(base.id)
+        result = {"status": "upgrade_unverified", "vehicle": base.model_dump(), "upgrades": []}
+        if base_entry is None or not base_entry.matches_vehicle(base):
+            return result
+        result["manufacturer_context"] = base_entry.manufacturer_context
+        if not candidates:
+            result["status"] = "no_higher_priced_trims"
+            return result
+        if base_entry.trim_rank is None:
+            return result
+
+        absent = {fact.topic: fact for fact in base_entry.facts
+                  if not fact.present and (feature is None or fact.topic == feature)}
+        for vehicle in candidates:
+            entry = entries.get(vehicle.id)
+            if (entry is None or not entry.matches_vehicle(vehicle)
+                    or entry.trim_rank is None or entry.trim_rank <= base_entry.trim_rank):
+                continue
+            added = [{"feature": fact.model_dump(), "base_evidence": absent[fact.topic].model_dump()}
+                     for fact in entry.facts if fact.present and fact.topic in absent]
+            if added:
+                result["upgrades"].append({
+                    "vehicle": vehicle.model_dump(), "price_difference": vehicle.price - base.price, "added": added,
+                })
+        if result["upgrades"]:
+            result["status"] = "verified_upgrades"
+            result["upgrades"] = result["upgrades"][:3]
+        return result
