@@ -51,6 +51,14 @@ evaluation_cases = {
         search("Find Honda sedans below 10 lakh.", (r"amaze.*city", r"\b800000\b", r"\b950000\b"),
                (r"\bZX\b",), brand="Honda", vehicle_type="Sedan", max_price=999999),
     ],
+    "purchase-recommendation": [
+        search("I want to buy a Honda sedan. My budget is up to 9 lakh. What should I go for and why?",
+               (r"\bamaze\b", r"\b800000\b", r"\b100000\b", r"on[\s\-–‑]road|test drive|\bemi\b"),
+               (r"\b(?:catalogue|catalog|data|information) (?:only (?:has|contains|provides|includes)|is limited)\b",
+                r"\bi (?:only have|don.t have)\b", r"\bcity\s+(?:vx|zx)\b",
+                r"\b(?:boot space|ride comfort|compact dimensions|easy to park)\b"),
+               brand="Honda", vehicle_type="Sedan", max_price=900000),
+    ],
     "inclusive-budget": [
         search("Show Honda City variants up to and including 10 lakh.", (r"\bVX\b.*\bZX\b",),
                brand="Honda", model="City", max_price=1000000),
